@@ -1,5 +1,5 @@
 {
-  "name": "claudecodex",
+  "name": "claudecodex-cli",
   "version": "1.0.0",
   "description": "Manage multiple Codex and Claude Code logins as named sessions, with a live sticky dashboard of remaining 5-hour and weekly limits.",
   "type": "module",
@@ -25,7 +25,8 @@
   "author": "Numan",
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
     "build": "tsc",
