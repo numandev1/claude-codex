@@ -33,7 +33,8 @@
     "dev": "tsc --watch --preserveWatchOutput",
     "run": "tsx src/cli.ts",
     "start": "node dist/cli.js",
-    "prepare": "tsc"
+    "prepare": "tsc",
+    "publish:npm": "npm publish --access public"
   },
   "engines": {
     "node": ">=18"

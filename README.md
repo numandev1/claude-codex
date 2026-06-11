@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ claudecodex
+# ⚡ Claude Codex Mutiple Session Manager
 
 **One keystroke to switch between all your Codex and Claude Code logins — and always know which account still has quota.**
 
