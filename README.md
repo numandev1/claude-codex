@@ -22,7 +22,7 @@ straight from each provider's own usage API, so you see real numbers *without* s
 
 <div align="center">
 
-![claudecodex dashboard](assets/dashboard.png)
+![claudecodex dashboard](https://raw.githubusercontent.com/numandev1/claude-codex/main/assets/dashboard.png)
 
 </div>
 
