@@ -1,8 +1,8 @@
 <div align="center">
 
-# ⚡ Claude Codex Mutiple Session Manager
+# ⚡ Claude / Codex Session Manager — Switch & Borrow Accounts
 
-**One keystroke to switch between all your Codex and Claude Code logins — and always know which account still has quota.**
+**One keystroke to switch between all your Codex and Claude Code logins, see which account still has quota — and borrow a friend's Codex / Claude without ever knowing their password.**
 
 [![npm version](https://img.shields.io/npm/v/claudecodex-cli.svg)](https://www.npmjs.com/package/claudecodex-cli)
 [![node](https://img.shields.io/node/v/claudecodex-cli.svg)](https://www.npmjs.com/package/claudecodex-cli)
@@ -19,6 +19,10 @@ a teammate's, a friend's), you're constantly re-logging in and losing your place
 **claudecodex** saves each login as a named **session**, lets you switch between them instantly, and
 shows a **live dashboard** of every account's remaining **5-hour** and **weekly** limits — read
 straight from each provider's own usage API, so you see real numbers *without* switching first.
+
+It can also [**borrow Codex / Claude from a friend**](#borrow-codex--claude-from-a-friend--without-their-password):
+send them a link, they tap "Authorise" in their browser, and a scoped coding-tool token lands on your
+machine — without you ever getting their password or account access.
 
 <div align="center">
 
