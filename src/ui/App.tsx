@@ -35,6 +35,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   const [loginPrompt, setLoginPrompt] = useState("");
   const pendingBlob = useRef<string | null>(null);
   const codeResolver = useRef<((code: string) => void) | null>(null);
+  const cancelLogin = useRef<(() => void) | null>(null);
   const [, setTick] = useState(0);
   const rowsRef = useRef<DashboardRow[]>([]);
 
@@ -73,25 +74,33 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
       return;
     }
     setBusy(true);
-    setStatus({ kind: "info", text: "Opening browser… sign in to the account to add." });
+    setStatus({ kind: "info", text: "Opening browser… sign in to the account to add.  (esc = cancel)" });
     try {
-      const res = await engine.getSession({
-        onUrl: (u) => setStatus({ kind: "info", text: `Sign in in the browser…  ${u.slice(0, 54)}…` }),
-        promptCode: (instr) =>
-          new Promise<string>((resolve) => {
-            codeResolver.current = resolve;
-            setLoginPrompt(instr);
-            setInput("");
-            setMode("loginCode");
-          }),
+      const res = await new Promise<Awaited<ReturnType<typeof engine.getSession>>>((resolve, reject) => {
+        cancelLogin.current = () => reject(new Error("Login cancelled."));
+        engine.getSession({
+          onUrl: (u) => setStatus({ kind: "info", text: `Sign in in the browser…  ${u.slice(0, 54)}…  (esc = cancel)` }),
+          promptCode: (instr) =>
+            new Promise<string>((resolveCode) => {
+              codeResolver.current = resolveCode;
+              setLoginPrompt(instr);
+              setInput("");
+              setMode("loginCode");
+            }),
+        }).then(resolve).catch(reject);
       });
+      cancelLogin.current = null;
       setMode("menu");
       reload();
       setStatus({ kind: "ok", text: `Added "${res.name}" (${res.email ?? "?"} · ${res.plan ?? "?"}). Fetching limits…` });
       void doRefresh();
     } catch (err) {
+      cancelLogin.current = null;
       setMode("menu");
-      setStatus({ kind: "err", text: (err as Error).message });
+      const msg = (err as Error).message;
+      setStatus(msg === "Login cancelled."
+        ? { kind: "info", text: "Login cancelled." }
+        : { kind: "err", text: msg });
     } finally {
       setBusy(false);
     }
@@ -127,7 +136,10 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   }, [engine, p]);
 
   useInput((char, key) => {
-    if (busy && mode === "menu") return;
+    if (busy && mode === "menu") {
+      if (key.escape && cancelLogin.current) { cancelLogin.current(); }
+      return;
+    }
 
     if (mode === "menu") {
       if (key.upArrow || char === "k") return setSelected((s) => Math.max(0, s - 1));
@@ -255,7 +267,12 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         </Box>
       ) : null}
 
-      {busy && mode === "menu" ? (<Box marginTop={1}><Text color="yellow">⏳ working…</Text></Box>) : null}
+      {busy && mode === "menu" ? (
+        <Box marginTop={1}>
+          <Text color="yellow">⏳ working…</Text>
+          {cancelLogin.current ? <Text dimColor>  esc = cancel</Text> : null}
+        </Box>
+      ) : null}
     </Box>
   );
 }
