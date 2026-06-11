@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { MANAGER_HOME } from "./paths.js";
 
-const PKG = "claudecodex";
+const PKG = "claudecodex-cli";
 const REGISTRY = `https://registry.npmjs.org/${PKG}/latest`;
 const CACHE_FILE = path.join(MANAGER_HOME, "update-check.json");
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // re-check the registry at most twice a day
@@ -120,7 +120,7 @@ export async function maybePromptUpdate(): Promise<void> {
 
   // Non-interactive or npx: notify and move on.
   if (!process.stdin.isTTY || !process.stdout.isTTY || isNpx()) {
-    process.stderr.write(`${banner}   ${C.dim("npm i -g claudecodex@latest")}\n`);
+    process.stderr.write(`${banner}   ${C.dim("npm i -g claudecodex-cli@latest")}\n`);
     return;
   }
 
@@ -135,7 +135,7 @@ export async function maybePromptUpdate(): Promise<void> {
   const install = spawnSync("npm", ["install", "-g", `${PKG}@latest`], { stdio: "inherit" });
   if (install.status !== 0) {
     process.stderr.write(C.yellow("  Update failed. Continuing on current version.\n"));
-    process.stderr.write(C.dim("  You can update manually: npm i -g claudecodex@latest\n\n"));
+    process.stderr.write(C.dim("  You can update manually: npm i -g claudecodex-cli@latest\n\n"));
     return;
   }
 

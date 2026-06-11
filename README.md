@@ -4,9 +4,9 @@
 
 **One keystroke to switch between all your Codex and Claude Code logins — and always know which account still has quota.**
 
-[![npm version](https://img.shields.io/npm/v/claudecodex.svg)](https://www.npmjs.com/package/claudecodex)
-[![node](https://img.shields.io/node/v/claudecodex.svg)](https://www.npmjs.com/package/claudecodex)
-[![license](https://img.shields.io/npm/l/claudecodex.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/claudecodex-cli.svg)](https://www.npmjs.com/package/claudecodex-cli)
+[![node](https://img.shields.io/node/v/claudecodex-cli.svg)](https://www.npmjs.com/package/claudecodex-cli)
+[![license](https://img.shields.io/npm/l/claudecodex-cli.svg)](./LICENSE)
 
 </div>
 
@@ -31,13 +31,13 @@ straight from each provider's own usage API, so you see real numbers *without* s
 **No install (recommended to try):**
 
 ```bash
-npx claudecodex
+npx claudecodex-cli
 ```
 
 **Global install** — then use the short `ccx` command anywhere:
 
 ```bash
-npm install -g claudecodex
+npm install -g claudecodex-cli
 ccx
 ```
 
