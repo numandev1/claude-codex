@@ -91,10 +91,13 @@ ccx codex remote                 # generate a remote guide link for a friend
 ccx claude remote                # same for Claude
 ```
 
-## Borrowing a session without touching the CLI
+## Borrow Codex / Claude from a friend — without their password
 
 If a friend has a ChatGPT Plus or Claude Pro subscription but doesn't use Codex / Claude Code
-themselves, you can get their session in seconds — they only need a browser.
+themselves, you can borrow their session in seconds. **You never get their password, email login,
+or account access** — they simply authorise the coding tool in their own browser and a scoped
+OAuth token lands on your machine. Their ChatGPT/Claude conversations, account settings, and
+credentials stay completely private.
 
 **One-time setup (you):** get a free [ngrok](https://ngrok.com) account and set your authtoken:
 ```bash
@@ -104,13 +107,22 @@ export NGROK_AUTHTOKEN=your_token_here   # add to ~/.zshrc to make it permanent
 **Every time:**
 1. In the TUI press **`r`** (or run `ccx codex remote` / `ccx claude remote`).  
    A link is copied to your clipboard — send it to your friend on WhatsApp, iMessage, etc.
-2. Friend opens the link on any device. They see a 3-step guide:
-   - **Step 1** — tap “Sign in with ChatGPT / Claude”
-   - **Step 2** — after signing in, their browser shows an error page (Codex) or a code page (Claude) — the guide explains exactly what to copy
+2. Friend opens the link on any device. They see a 3-step guide that first explains exactly
+   what is shared (the coding-tool access only) and what stays private (chats, account, password):
+   - **Step 1** — tap “Authorise Codex / Claude Code Access” and sign in on the provider's own page
+   - **Step 2** — copy what the provider shows after signing in. The guide includes a screenshot
+     of exactly what to look for:
+
+     **Codex** — the browser lands on a `localhost:1455` error page; they copy the URL from the address bar:
+
+     ![Codex callback URL in the address bar](https://raw.githubusercontent.com/numandev1/claude-codex/main/assets/codex-callback.png)
+
+     **Claude** — Anthropic shows an Authentication Code page; they tap **Copy Code**:
+
+     ![Anthropic authentication code page](https://raw.githubusercontent.com/numandev1/claude-codex/main/assets/claude-auth-code.png)
+
    - **Step 3** — paste it into the form on the guide page and hit Submit
 3. The token lands on **your** machine automatically. The session is saved and named after their email. Friend sees “✅ All done!” and closes the page.
-
-Their password is never shared — only an OAuth token is transferred.
 
 > ⚠️ **A token grants full access to that account.** Share only over trusted channels.
 

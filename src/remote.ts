@@ -1,5 +1,8 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ngrok from "@ngrok/ngrok";
 import { exchangeCode, exchangeApiKey } from "./login.js";
 import { decodeJwtPayload } from "./auth.js";
@@ -69,45 +72,68 @@ function buildClaudeAuthUrl(challenge: string, state: string): string {
 
 // ── Landing pages ────────────────────────────────────────────────────────────
 
+const _dir = path.dirname(fileURLToPath(import.meta.url));
+const codexB64 = readFileSync(path.join(_dir, "../assets/codex-callback.png")).toString("base64");
+const claudeB64 = readFileSync(path.join(_dir, "../assets/claude-auth-code.png")).toString("base64");
+
 function buildCodexLandingPage(authUrl: string, showError = false): string {
   const errorBanner = showError
-    ? `<div class="alert">⚠️ That didn't work — the code may have expired. Please sign in again and copy the new URL.</div>`
+    ? `<div class="alert">That didn't work — the code may have expired. Please sign in again and copy the new URL.</div>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Connect Your ChatGPT Account</title>
+  <title>Codex Access Request</title>
   ${styles()}
 </head>
 <body>
-  <div class="card">
-    <div class="logo">🔑</div>
-    <h1>Connect Your ChatGPT Account</h1>
-    <p class="sub">Your friend wants to borrow your ChatGPT Plus access for Codex.<br>Takes about 1 minute. No password shared.</p>
+  <div class="wrap">
+    <div class="header">
+      <div class="pill">🔒 Codex Access Request</div>
+      <h1>Your friend wants to use Codex<br>with your account</h1>
+      <p class="sub">Codex is an AI coding tool. Approving this <strong style="color:#e8e8e8">only</strong> gives access to the Codex tool — nothing else.</p>
+    </div>
+
+    <div class="trust">
+      <div class="trust-row">
+        <div class="trust-col">
+          <div class="trust-label shared">What gets shared</div>
+          <div class="trust-item"><span class="dot dot-green"></span>Codex tool access only</div>
+        </div>
+        <div class="trust-col">
+          <div class="trust-label private">Stays private</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Your ChatGPT chats</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Messages &amp; history</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Account &amp; password</div>
+        </div>
+      </div>
+    </div>
+
     ${errorBanner}
+
     <div class="step">
-      <div class="num">1</div>
-      <h2>Sign in with ChatGPT</h2>
-      <p>Tap the button below. A new page will open — log in with your ChatGPT account.</p>
-      <a href="${authUrl}" target="_blank" rel="noopener" class="btn">Sign in with ChatGPT →</a>
+      <div class="step-header"><div class="num">1</div><h2>Sign in to authorise Codex</h2></div>
+      <p>Tap below. A new tab opens — log in with your OpenAI account to grant Codex access.</p>
+      <a href="${authUrl}" target="_blank" rel="noopener" class="btn">Authorise Codex Access →</a>
     </div>
+
     <div class="step">
-      <div class="num">2</div>
-      <h2>You'll see an error page — that's normal</h2>
-      <p>After signing in, the browser redirects and shows a <strong>"This site can't be reached"</strong> error. That's expected.</p>
-      <div class="tip">📋 Look at your browser's <strong>address bar</strong> — it shows a URL starting with <code>localhost:1455/auth/callback?code=…</code><br><br>Copy that entire URL.</div>
+      <div class="step-header"><div class="num">2</div><h2>Copy the URL from the error page</h2></div>
+      <p>After signing in, your browser will show a "This site can't be reached" error. That's expected — look at the <strong style="color:#e8e8e8">address bar</strong> at the top.</p>
+      <img src="data:image/png;base64,${codexB64}" alt="browser address bar showing callback URL" class="screenshot">
+      <div class="hint">Copy the entire URL from the address bar — it starts with <code style="background:#0f1f0f;padding:1px 5px;border-radius:3px;color:#86efac">localhost:1455/auth/callback?code=…</code></div>
     </div>
+
     <div class="step">
-      <div class="num">3</div>
-      <h2>Paste the URL below and submit</h2>
-      <p>Come back to this page, paste the URL you copied, and hit Submit.</p>
+      <div class="step-header"><div class="num">3</div><h2>Paste it here and submit</h2></div>
+      <p>Come back to this tab, paste the URL, and tap Submit. Your friend will get access instantly.</p>
       <form method="POST" action="/submit">
         <textarea name="code" placeholder="localhost:1455/auth/callback?code=..." required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
         <button type="submit" class="submit">Submit →</button>
       </form>
-      <p class="note">This sends only an auth token to your friend's computer. Your password is never shared.</p>
+      <p class="note">Only a Codex API token is transferred. Your password and ChatGPT account are never touched.</p>
     </div>
   </div>
 </body>
@@ -116,43 +142,62 @@ function buildCodexLandingPage(authUrl: string, showError = false): string {
 
 function buildClaudeLandingPage(authUrl: string, showError = false): string {
   const errorBanner = showError
-    ? `<div class="alert">⚠️ That didn't work — the code may have expired. Please sign in again and copy a fresh code.</div>`
+    ? `<div class="alert">That didn't work — the code may have expired. Please sign in again and copy a fresh code.</div>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Connect Your Claude Account</title>
+  <title>Claude Code Access Request</title>
   ${styles()}
 </head>
 <body>
-  <div class="card">
-    <div class="logo">🤖</div>
-    <h1>Connect Your Claude Account</h1>
-    <p class="sub">Your friend wants to borrow your Claude Pro access.<br>Takes about 1 minute. No password shared.</p>
+  <div class="wrap">
+    <div class="header">
+      <div class="pill">🔒 Claude Code Access Request</div>
+      <h1>Your friend wants to use Claude Code<br>with your account</h1>
+      <p class="sub">Claude Code is an AI coding tool. Approving this <strong style="color:#e8e8e8">only</strong> gives access to the Claude Code tool — nothing else.</p>
+    </div>
+
+    <div class="trust">
+      <div class="trust-row">
+        <div class="trust-col">
+          <div class="trust-label shared">What gets shared</div>
+          <div class="trust-item"><span class="dot dot-green"></span>Claude Code tool access only</div>
+        </div>
+        <div class="trust-col">
+          <div class="trust-label private">Stays private</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Your Claude conversations</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Messages &amp; history</div>
+          <div class="trust-item"><span class="dot dot-red"></span>Account &amp; password</div>
+        </div>
+      </div>
+    </div>
+
     ${errorBanner}
+
     <div class="step">
-      <div class="num">1</div>
-      <h2>Sign in with Claude</h2>
-      <p>Tap the button below. A new page will open — log in with your Anthropic / Claude account.</p>
-      <a href="${authUrl}" target="_blank" rel="noopener" class="btn">Sign in with Claude →</a>
+      <div class="step-header"><div class="num">1</div><h2>Sign in to authorise Claude Code</h2></div>
+      <p>Tap below. A new tab opens — log in with your Anthropic account to grant Claude Code access.</p>
+      <a href="${authUrl}" target="_blank" rel="noopener" class="btn">Authorise Claude Code Access →</a>
     </div>
+
     <div class="step">
-      <div class="num">2</div>
-      <h2>Copy the code shown by Anthropic</h2>
-      <p>After signing in, Anthropic will show you a page with a <strong>code</strong> on it.</p>
-      <div class="tip">📋 Copy that code — it looks like a long string of letters and numbers.</div>
+      <div class="step-header"><div class="num">2</div><h2>Copy the code Anthropic shows you</h2></div>
+      <p>After signing in, Anthropic shows you this page with a one-time code:</p>
+      <img src="data:image/png;base64,${claudeB64}" alt="Anthropic authentication code page" class="screenshot">
+      <div class="hint">Tap <strong>Copy Code</strong> on that page, then come back here.</div>
     </div>
+
     <div class="step">
-      <div class="num">3</div>
-      <h2>Paste the code below and submit</h2>
-      <p>Come back to this page, paste the code you copied, and hit Submit.</p>
+      <div class="step-header"><div class="num">3</div><h2>Paste the code here and submit</h2></div>
+      <p>Come back to this tab, paste the code, and tap Submit. Your friend will get access instantly.</p>
       <form method="POST" action="/submit">
         <textarea name="code" placeholder="Paste the code from Anthropic here…" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
         <button type="submit" class="submit">Submit →</button>
       </form>
-      <p class="note">This sends only an auth token to your friend's computer. Your password is never shared.</p>
+      <p class="note">Only a Claude Code API token is transferred. Your password and Claude conversations are never touched.</p>
     </div>
   </div>
 </body>
@@ -165,20 +210,21 @@ function buildSuccessPage(email: string | null, providerLabel: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>All done!</title>
+  <title>Done</title>
   <style>
-    body{font-family:-apple-system,sans-serif;background:#0d0d0d;color:#e5e5e5;min-height:100vh;display:flex;justify-content:center;align-items:center;text-align:center;padding:24px}
-    .icon{font-size:64px;margin-bottom:20px}
-    h1{font-size:26px;font-weight:700;color:#10b981;margin-bottom:10px}
-    p{font-size:15px;color:#888;line-height:1.6}
-    .email{color:#6ee7b7;font-weight:600}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,-apple-system,sans-serif;background:#060606;color:#e8e8e8;min-height:100vh;display:flex;justify-content:center;align-items:center;text-align:center;padding:24px}
+    .icon{font-size:52px;margin-bottom:20px}
+    h1{font-size:24px;font-weight:700;color:#fff;margin-bottom:8px}
+    p{font-size:14px;color:#737373;line-height:1.7}
+    .email{color:#86efac;font-weight:500}
   </style>
 </head>
 <body>
   <div>
     <div class="icon">✅</div>
-    <h1>You're all set!</h1>
-    <p>${email ? `Account <span class="email">${email}</span> connected.<br>` : ""}Your friend now has access to your ${providerLabel} session.<br>You can close this page.</p>
+    <h1>All done</h1>
+    <p>${email ? `Account <span class="email">${email}</span> connected.<br>` : ""}Your friend now has access to the ${providerLabel} tool.<br>You can close this page.</p>
   </div>
 </body>
 </html>`;
@@ -186,26 +232,44 @@ function buildSuccessPage(email: string | null, providerLabel: string): string {
 
 function styles(): string {
   return `<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0d0d0d;color:#e5e5e5;min-height:100vh;padding:24px 16px;display:flex;justify-content:center}
-    .card{max-width:460px;width:100%}
-    .logo{font-size:32px;margin-bottom:8px}
-    h1{font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
-    .sub{font-size:14px;color:#888;margin-bottom:28px;line-height:1.5}
-    .step{background:#161616;border:1px solid #2a2a2a;border-radius:14px;padding:20px;margin-bottom:14px}
-    .num{width:30px;height:30px;border-radius:50%;background:#10b981;color:#000;font-weight:800;font-size:13px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px}
-    .step h2{font-size:15px;font-weight:600;color:#fff;margin-bottom:6px}
-    .step p{font-size:13px;color:#999;line-height:1.6}
-    .btn{display:block;width:100%;padding:15px;background:#10b981;color:#000;font-weight:700;font-size:15px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;margin-top:14px}
-    .btn:active{opacity:.85}
-    code{background:#1e1e1e;color:#6ee7b7;padding:2px 6px;border-radius:4px;font-size:12px;word-break:break-all}
-    textarea{width:100%;background:#111;border:1px solid #333;border-radius:8px;color:#e5e5e5;font-family:monospace;font-size:12px;padding:10px 12px;margin-top:10px;height:86px;resize:vertical;line-height:1.5}
-    textarea:focus{outline:none;border-color:#10b981}
-    textarea::placeholder{color:#555}
-    .submit{width:100%;padding:14px;background:#10b981;color:#000;font-weight:700;font-size:15px;border:none;border-radius:10px;cursor:pointer;margin-top:10px}
-    .note{font-size:11px;color:#555;margin-top:8px;line-height:1.5}
-    .alert{background:#2d0e0e;border:1px solid #6b2020;border-radius:10px;padding:14px;font-size:13px;color:#f87171;margin-bottom:16px;line-height:1.5}
-    .tip{background:#0e1f1a;border:1px solid #1a3d30;border-radius:8px;padding:10px 12px;font-size:12px;color:#6ee7b7;margin-top:10px;line-height:1.6}
+    body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#060606;color:#e8e8e8;min-height:100vh;padding:32px 16px 48px;display:flex;justify-content:center}
+    .wrap{max-width:480px;width:100%}
+    /* ── header ── */
+    .header{margin-bottom:28px}
+    .pill{display:inline-flex;align-items:center;gap:6px;background:#0f1923;border:1px solid #1a3050;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;color:#60a5fa;letter-spacing:.4px;text-transform:uppercase;margin-bottom:16px}
+    h1{font-size:22px;font-weight:700;color:#fff;line-height:1.3;margin-bottom:6px}
+    .sub{font-size:14px;color:#737373;line-height:1.6}
+    /* ── trust box ── */
+    .trust{background:#090f09;border:1px solid #1a2e1a;border-radius:12px;padding:16px 18px;margin-bottom:24px}
+    .trust-row{display:flex;gap:16px}
+    .trust-col{flex:1}
+    .trust-label{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px}
+    .trust-label.shared{color:#4ade80}
+    .trust-label.private{color:#f87171}
+    .trust-item{display:flex;align-items:flex-start;gap:6px;font-size:12px;color:#a3a3a3;line-height:1.5;margin-bottom:4px}
+    .trust-item .dot{margin-top:3px;flex-shrink:0;width:6px;height:6px;border-radius:50%}
+    .dot-green{background:#4ade80}
+    .dot-red{background:#f87171}
+    /* ── steps ── */
+    .step{border:1px solid #1a1a1a;border-radius:12px;padding:20px;margin-bottom:12px;background:#0a0a0a}
+    .step-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .num{width:26px;height:26px;border-radius:50%;background:#1e3a6e;color:#93c5fd;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .step h2{font-size:14px;font-weight:600;color:#e8e8e8}
+    .step p{font-size:13px;color:#737373;line-height:1.6}
+    .btn{display:block;width:100%;padding:14px;background:#1d4ed8;color:#fff;font-weight:600;font-size:14px;border:none;border-radius:8px;cursor:pointer;text-align:center;text-decoration:none;margin-top:14px;transition:background .15s}
+    .btn:hover{background:#2563eb}
+    .btn:active{background:#1e40af}
+    img.screenshot{width:100%;border-radius:8px;margin-top:14px;border:1px solid #1e1e1e;display:block}
+    .hint{background:#0a0f0a;border:1px solid #1a2a1a;border-radius:8px;padding:10px 13px;font-size:12px;color:#86efac;margin-top:12px;line-height:1.6}
+    textarea{width:100%;background:#0a0a0a;border:1px solid #262626;border-radius:8px;color:#e8e8e8;font-family:monospace;font-size:12px;padding:11px 13px;margin-top:12px;height:82px;resize:none;line-height:1.5;outline:none;transition:border .15s}
+    textarea:focus{border-color:#2563eb}
+    textarea::placeholder{color:#404040}
+    .submit{width:100%;padding:13px;background:#1d4ed8;color:#fff;font-weight:600;font-size:14px;border:none;border-radius:8px;cursor:pointer;margin-top:10px;transition:background .15s}
+    .submit:hover{background:#2563eb}
+    .note{font-size:11px;color:#404040;margin-top:8px;line-height:1.5}
+    .alert{background:#1a0a0a;border:1px solid #450a0a;border-radius:8px;padding:13px;font-size:13px;color:#fca5a5;margin-bottom:16px;line-height:1.5}
   </style>`;
 }
 
@@ -338,11 +402,11 @@ export async function runRemoteLoginFlow(opts: RemoteLoginOptions): Promise<Logi
   if (!authtoken) {
     throw new Error(
       "NGROK_AUTHTOKEN is not set.\n\n" +
-        "To use remote sessions:\n" +
-        "  1. Sign up free at https://ngrok.com\n" +
-        "  2. Copy your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken\n" +
-        "  3. Run:  export NGROK_AUTHTOKEN=<your-token>\n" +
-        "  4. Then press [r] again.",
+      "To use remote sessions:\n" +
+      "  1. Sign up free at https://ngrok.com\n" +
+      "  2. Copy your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken\n" +
+      "  3. Run:  export NGROK_AUTHTOKEN=<your-token>\n" +
+      "  4. Then press [r] again.",
     );
   }
 
@@ -351,7 +415,7 @@ export async function runRemoteLoginFlow(opts: RemoteLoginOptions): Promise<Logi
   const authUrl = isCodex
     ? buildCodexAuthUrl(challenge, state)
     : buildClaudeAuthUrl(challenge, state);
-  const providerLabel = isCodex ? "ChatGPT" : "Claude";
+  const providerLabel = isCodex ? "Codex" : "Claude";
 
   const port = 13456 + Math.floor(Math.random() * 500);
 
