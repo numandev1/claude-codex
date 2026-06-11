@@ -1,0 +1,51 @@
+{
+  "name": "claudecodex",
+  "version": "1.0.0",
+  "description": "Manage multiple Codex and Claude Code logins as named sessions, with a live sticky dashboard of remaining 5-hour and weekly limits.",
+  "type": "module",
+  "bin": {
+    "claudecodex": "bin/claudecodex.mjs",
+    "ccx": "bin/claudecodex.mjs"
+  },
+  "keywords": [
+    "codex",
+    "claude",
+    "claude-code",
+    "chatgpt",
+    "cli",
+    "session-manager",
+    "account-switcher",
+    "rate-limit",
+    "usage",
+    "openai",
+    "anthropic",
+    "ink",
+    "tui"
+  ],
+  "author": "Numan",
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch --preserveWatchOutput",
+    "run": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "prepare": "tsc"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "license": "MIT"
+}
