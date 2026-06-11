@@ -12,6 +12,7 @@ import { formatReset } from "./rateLimits.js";
 import { migrateLegacyCodex } from "./paths.js";
 import { maybePromptUpdate, currentVersion } from "./version.js";
 import { pasteFromClipboard } from "./clipboard.js";
+import { runRemoteLoginFlow } from "./remote.js";
 
 const HELP = `claudecodex v${currentVersion()} — manage multiple Codex and Claude Code logins as sessions
 
@@ -29,6 +30,7 @@ Commands (per provider):
   delete <name>           Delete a saved session
   refresh                 Fetch live 5h/weekly limits for every session
   get-session [name]      Log a NEW account in via the browser and save it
+  remote [name]           Generate a public link — friend opens it, you get their session
   share <name> [outfile]  Print/write a shareable token for a session
   set <name> [tok|@file]  Save a token as a session (default: reads the clipboard)
 
@@ -125,6 +127,32 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
         console.error(`  ! ${f.name}: ${f.needsReauth ? `session ended — re-run \`claudecodex ${p.id} get-session\`` : f.error || "failed"}`);
       }
       console.log(renderPlainDashboard(engine.loadRegistry()));
+      break;
+    }
+    case "remote": {
+      if (p.id !== "codex" && p.id !== "claude") die("Remote link is only supported for Codex and Claude.");
+      let remoteRes;
+      try {
+        remoteRes = await runRemoteLoginFlow({
+          provider: p.id as "codex" | "claude",
+          onUrl: (url) => {
+            console.log("\n🔗 Send this link to your friend:\n");
+            console.log("  " + url + "\n");
+            console.log("They open it and follow 3 steps — you'll get the token automatically.\n");
+            console.log("Waiting…  Ctrl+C to cancel\n");
+          },
+        });
+      } catch (e) { die((e as Error).message); }
+      const suggested =
+        (remoteRes.email ? remoteRes.email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "") : "") ||
+        args[0] || "remote-session";
+      engine.persistSession(suggested, remoteRes.auth as any, {
+        overwrite: !!engine.loadRegistry().sessions[suggested],
+        setActive: false,
+      });
+      await engine.refreshSession(suggested);
+      console.log(`\nSaved "${suggested}" (${remoteRes.email ?? "unknown"} · ${remoteRes.plan ?? "?"}).`);
+      console.log("\n" + renderPlainDashboard(engine.loadRegistry()));
       break;
     }
     case "get-session":

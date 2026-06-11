@@ -70,7 +70,8 @@ Interactive (run `ccx`, or `ccx codex` / `ccx claude`):
 | `s` | **save** the current login as a session |
 | `c` | **copy** the selected session's token to the clipboard (to share) |
 | `a` | **accept** a token from the clipboard (paste a shared one in) |
-| `r` `d` `R` | rename · delete · refresh live limits |
+| `r` | **remote link** — generate a guide page your friend opens to share their session |
+| `n` `d` `R` | rename · delete · refresh live limits |
 | `q` | back to provider chooser (or quit) |
 
 Scriptable (`ccx <codex|claude> <command>`):
@@ -86,30 +87,52 @@ ccx codex share work tok.txt     # write a shareable token file
 ccx codex set work             # save a token from the clipboard (or pass it / @file / stdin)
 ccx codex rename work old        # rename / delete
 ccx codex delete old
+ccx codex remote                 # generate a remote guide link for a friend
+ccx claude remote                # same for Claude
 ```
 
-## Borrowing an account
+## Borrowing a session without touching the CLI
 
-A friend with a ChatGPT or Claude subscription can lend you a session without sharing their password:
+If a friend has a ChatGPT Plus or Claude Pro subscription but doesn't use Codex / Claude Code
+themselves, you can get their session in seconds — they only need a browser.
 
+**One-time setup (you):** get a free [ngrok](https://ngrok.com) account and set your authtoken:
 ```bash
-# Them (or you, with them signing into the browser):
-ccx codex get-session alice          # → prints a one-line token blob
-
-# You:
-ccx codex set alice                  # reads the clipboard automatically (or @file / pipe)
-ccx codex use alice && codex
+export NGROK_AUTHTOKEN=your_token_here   # add to ~/.zshrc to make it permanent
 ```
 
-In the TUI: press **c** on a session to copy its token, send it over, the other person presses **a**
-to paste it in and name it. Tokens are provider-tagged, so a Codex token can't be imported into
-Claude and vice-versa.
+**Every time:**
+1. In the TUI press **`r`** (or run `ccx codex remote` / `ccx claude remote`).  
+   A link is copied to your clipboard — send it to your friend on WhatsApp, iMessage, etc.
+2. Friend opens the link on any device. They see a 3-step guide:
+   - **Step 1** — tap “Sign in with ChatGPT / Claude”
+   - **Step 2** — after signing in, their browser shows an error page (Codex) or a code page (Claude) — the guide explains exactly what to copy
+   - **Step 3** — paste it into the form on the guide page and hit Submit
+3. The token lands on **your** machine automatically. The session is saved and named after their email. Friend sees “✅ All done!” and closes the page.
+
+Their password is never shared — only an OAuth token is transferred.
 
 > ⚠️ **A token grants full access to that account.** Share only over trusted channels.
 
 > ⚠️ **One live session per account:** the provider ends the previous session when the *same*
 > account signs in again elsewhere. If a borrowed session shows “session ended,” re-run
-> `get-session`. Different accounts coexist fine.
+> `get-session` or ask your friend to use `remote` again. Different accounts coexist fine.
+
+## Borrowing a session the manual way (no ngrok)
+
+If you'd rather not use ngrok, you can still share sessions via token blobs:
+
+```bash
+# Friend runs:
+ccx codex get-session            # browser login → prints a one-line token blob
+
+# You run:
+ccx codex set alice              # reads from clipboard (or @file / piped stdin)
+ccx codex use alice && codex
+```
+
+In the TUI: press **c** on a session to copy its token, send it to your friend, they press **a**
+to paste and name it. Tokens are provider-tagged — a Codex token can't be imported into Claude.
 
 ## How it works
 

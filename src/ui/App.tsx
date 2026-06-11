@@ -5,6 +5,7 @@ import Brand from "./Brand.js";
 import type { DashboardRow } from "../dashboard.js";
 import { Engine } from "../engine.js";
 import { copyToClipboard, pasteFromClipboard } from "../clipboard.js";
+import { runRemoteLoginFlow } from "../remote.js";
 import type { Registry } from "../types.js";
 
 type Mode = "menu" | "save" | "rename" | "confirmDelete" | "acceptName" | "loginCode";
@@ -126,7 +127,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
     try {
       const raw = await pasteFromClipboard();
       if (!raw) { setStatus({ kind: "err", text: `Clipboard empty. Use: claudecodex ${p.id} set <name> @file` }); return; }
-      const { auth } = engine.decodeBlob(raw); // validates + provider check happens on import
+      const { auth } = engine.decodeBlob(raw);
       pendingBlob.current = raw;
       setInput(suggestName() || (p.describeAuth(auth).email?.split("@")[0] ?? ""));
       setMode("acceptName");
@@ -134,6 +135,39 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
     } catch (err) { setStatus({ kind: "err", text: `No valid token in clipboard: ${(err as Error).message}` }); }
     finally { setBusy(false); }
   }, [engine, p]);
+
+  const doRemoteSession = useCallback(async () => {
+    if (p.id !== "codex" && p.id !== "claude") {
+      setStatus({ kind: "err", text: "Remote link is only supported for Codex and Claude." });
+      return;
+    }
+    setBusy(true);
+    setStatus({ kind: "info", text: "Starting guide page…" });
+    const abortCtrl = new AbortController();
+    cancelLogin.current = () => abortCtrl.abort();
+    try {
+      const res = await runRemoteLoginFlow({
+        provider: p.id as "codex" | "claude",
+        signal: abortCtrl.signal,
+        onUrl: (url) => {
+          void copyToClipboard(url);
+          setStatus({ kind: "info", text: `🔗 Link copied! Send to friend:\n${url}\n\nThey follow 3 steps on that page — token arrives automatically.  esc = cancel` });
+        },
+      });
+      cancelLogin.current = null;
+      const suggested = res.email ? res.email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "") : "remote-session";
+      engine.persistSession(suggested, res.auth as any, { overwrite: !!engine.loadRegistry().sessions[suggested], setActive: false });
+      reload();
+      setStatus({ kind: "ok", text: `Remote session saved as "${suggested}". Fetching limits…` });
+      void doRefresh();
+    } catch (err) {
+      cancelLogin.current = null;
+      const msg = (err as Error).message;
+      setStatus(msg === "Login cancelled." ? { kind: "info", text: "Remote login cancelled." } : { kind: "err", text: msg });
+    } finally {
+      setBusy(false);
+    }
+  }, [engine, p, reload, doRefresh]);
 
   useInput((char, key) => {
     if (busy && mode === "menu") {
@@ -168,7 +202,8 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         if (!p.isLoggedIn()) return setStatus({ kind: "err", text: `Not logged in to ${p.label}.` });
         setInput(suggestName()); setStatus(null); setMode("save"); return;
       }
-      if (char === "r") { const row = currentRow(); if (!row) return; setInput(row.name); setStatus(null); setMode("rename"); return; }
+      if (char === "r") return void doRemoteSession();
+      if (char === "n") { const row = currentRow(); if (!row) return; setInput(row.name); setStatus(null); setMode("rename"); return; }
       if (char === "d") { if (!currentRow()) return; setStatus(null); setMode("confirmDelete"); return; }
       if (char === "R") { setStatus({ kind: "info", text: "Refreshing…" }); void doRefresh().then(() => setStatus({ kind: "ok", text: "Limits updated." })); return; }
       if (key.ctrl && char === "c") return exit();        // hard quit
@@ -259,9 +294,9 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
 
       {mode === "menu" && !busy ? (
         <Box marginTop={1} flexDirection="column">
-          <Text dimColor>↑/↓ select · enter switch · [b]est · [g]et-new · [s]ave</Text>
+          <Text dimColor>↑/↓ select · enter switch · [b]est · [g]et-new · [s]ave · [r]emote-link</Text>
           <Text dimColor>
-            [c]opy-token · [a]ccept-token · [r]ename · [d]elete · [R]efresh ·{" "}
+            [c]opy-token · [a]ccept-token · [n]ame(rename) · [d]elete · [R]efresh ·{" "}
             {onBack ? "[q] back to providers" : "[q]uit"}
           </Text>
         </Box>

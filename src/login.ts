@@ -66,7 +66,7 @@ interface TokenResponse {
   [k: string]: unknown;
 }
 
-async function exchangeCode(code: string, verifier: string): Promise<TokenResponse> {
+export async function exchangeCode(code: string, verifier: string): Promise<TokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -87,7 +87,7 @@ async function exchangeCode(code: string, verifier: string): Promise<TokenRespon
 }
 
 /** Best-effort: exchange the id_token for an OpenAI API key, like codex does. */
-async function exchangeApiKey(idToken: string): Promise<string | null> {
+export async function exchangeApiKey(idToken: string): Promise<string | null> {
   try {
     const body = new URLSearchParams({
       grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
