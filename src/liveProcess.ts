@@ -7,6 +7,17 @@ export const RESUME_HINT: Record<string, string> = {
 };
 
 /**
+ * Whether a provider's running CLI picks up swapped credentials without a
+ * restart. Claude Code re-reads its credentials, so it hot-swaps; Codex loads
+ * auth.json once at startup and keeps it in memory until the process exits
+ * (openai/codex#17041).
+ */
+export const HOT_SWAP: Record<string, boolean> = {
+  codex: false,
+  claude: true,
+};
+
+/**
  * Count running CLI processes for a provider (exact basename match, so IDE
  * extension instances count too — they hold the old token just the same).
  * Best-effort: returns 0 on platforms/setups where detection isn't possible.
@@ -32,6 +43,9 @@ export function runningProcessCount(providerId: string): number {
 export function midSwitchWarning(providerId: string): string | null {
   const n = runningProcessCount(providerId);
   if (n === 0) return null;
+  if (HOT_SWAP[providerId]) {
+    return `Running ${providerId} session${n === 1 ? "" : "s"} will pick up the new account automatically.`;
+  }
   const what = n === 1 ? `a ${providerId} process is` : `${n} ${providerId} processes are`;
   const resume = RESUME_HINT[providerId] ?? providerId;
   return `⚠ ${what} still running on the previous account — close ${n === 1 ? "it" : "them"}, then continue your chat with \`${resume}\`.`;

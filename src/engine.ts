@@ -42,10 +42,23 @@ export class Engine {
   private matchActive(registry: Registry, liveAuth: SessionAuth | null): string | null {
     const fp = this.provider.fingerprint(liveAuth);
     if (!fp) return null;
-    for (const [name, meta] of Object.entries(registry.sessions)) {
-      if (meta.fingerprint && meta.fingerprint === fp) return name;
+    const matches = Object.entries(registry.sessions).filter(
+      ([, meta]) => meta.fingerprint && meta.fingerprint === fp,
+    );
+    if (matches.length === 0) return null;
+    if (matches.length === 1) return matches[0][0];
+    // Fingerprint tie (e.g. Claude accounts in the same org share an org
+    // fingerprint): disambiguate by email, then keep the current active
+    // session rather than flipping to whichever happens to be listed first.
+    const liveEmail = this.provider.describeAuth(liveAuth).email;
+    if (liveEmail) {
+      const byEmail = matches.find(([, meta]) => meta.email === liveEmail);
+      if (byEmail) return byEmail[0];
     }
-    return null;
+    if (registry.active && matches.some(([name]) => name === registry.active)) {
+      return registry.active;
+    }
+    return matches[0][0];
   }
 
   /** Reconcile registry with disk: which saved session is the live login? */
@@ -191,8 +204,14 @@ export class Engine {
   }
 
   async refreshAll(): Promise<RefreshOutcome[]> {
+    // Sequential on purpose: each refreshSession does a load-mutate-save on
+    // the registry, so concurrent refreshes clobber each other's writes
+    // (lost rateLimits, and worse — a stale `active` re-written over a switch
+    // the user just made).
     const names = Object.keys(this.store.loadRegistry().sessions);
-    return Promise.all(names.map((n) => this.refreshSession(n)));
+    const outcomes: RefreshOutcome[] = [];
+    for (const n of names) outcomes.push(await this.refreshSession(n));
+    return outcomes;
   }
 
   // ---- sharing ----
