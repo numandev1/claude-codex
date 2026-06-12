@@ -54,7 +54,7 @@ credentials file; Codex reads `~/.codex/auth.json`.)
 ## Quick start
 
 ```bash
-ccx                      # pick Codex or Claude, then manage interactively
+ccx # pick Codex or Claude, then manage interactively
 ```
 
 1. Log into an account the normal way (`codex login`, or sign in to Claude Code).
@@ -158,6 +158,12 @@ to paste and name it. Tokens are provider-tagged — a Codex token can't be impo
   - **Claude Code** → the `Claude Code-credentials` entry (macOS Keychain)
 - **Switching** restores a snapshot over the live credentials. The outgoing session is re-synced
   first, so rotated refresh tokens are never lost.
+- **Switching mid-session: Claude Code hot-swaps, Codex needs a restart.** Claude Code re-reads
+  the keychain, so a running `claude` session picks up the new account on its own. Codex loads
+  `auth.json` once at startup and keeps it in memory ([openai/codex#17041](https://github.com/openai/codex/issues/17041)),
+  so claudecodex warns you when it detects running `codex` processes after a switch. Your
+  conversation isn't lost: close the running Codex, switch, then pick the chat back up under the
+  new account with `codex resume --last`.
 - **Live limits, per account, without switching:**
   - Codex → `chatgpt.com/backend-api/wham/usage` (`primary` = 5h, `secondary` = weekly)
   - Claude → `api.anthropic.com/api/oauth/usage` (`five_hour` + `seven_day`)

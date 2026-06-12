@@ -6,6 +6,7 @@ import type { DashboardRow } from "../dashboard.js";
 import { Engine } from "../engine.js";
 import { copyToClipboard, pasteFromClipboard } from "../clipboard.js";
 import { runRemoteLoginFlow } from "../remote.js";
+import { runningProcessCount, RESUME_HINT, HOT_SWAP } from "../liveProcess.js";
 import type { Registry } from "../types.js";
 
 type Mode = "menu" | "save" | "rename" | "confirmDelete" | "acceptName" | "loginCode";
@@ -19,6 +20,15 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   const p = engine.provider;
   const accent = ACCENT[p.id] ?? "cyan";
   const cliName = p.id === "codex" ? "codex" : "claude";
+
+  // After a switch: plain "run it" hint, or a warning when the CLI is still
+  // running (Codex keeps the previous account's token until restarted;
+  // Claude Code hot-swaps from the keychain, so no warning needed).
+  const switchFollowUp = () => {
+    const n = HOT_SWAP[p.id] ? 0 : runningProcessCount(p.id);
+    if (n === 0) return `Run \`${cliName}\` to use it.`;
+    return `⚠ ${n} running ${cliName} ${n === 1 ? "process keeps" : "processes keep"} the old account — restart, then \`${RESUME_HINT[p.id] ?? cliName}\` to continue your chat.`;
+  };
 
   const suggestName = () => {
     const e = p.describeAuth(p.readLiveAuth()).email;
@@ -53,14 +63,24 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
     setSelected((s) => Math.max(0, Math.min(s, Math.max(0, count - 1))));
   }, [engine, p]);
 
+  const refreshInFlight = useRef(false);
   const doRefresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setRefreshing(true);
     try { await engine.refreshAll(); } catch { /* tolerate */ }
     reload();
     setRefreshing(false);
+    refreshInFlight.current = false;
   }, [engine, reload]);
 
   useEffect(() => { void doRefresh(); }, [doRefresh]);
+
+  // Keep usage genuinely live: re-fetch periodically, not just once on mount.
+  useEffect(() => {
+    const id = setInterval(() => { void doRefresh(); }, 60_000);
+    return () => clearInterval(id);
+  }, [doRefresh]);
 
   const currentRow = (): DashboardRow | undefined => rowsRef.current[selected];
 
@@ -183,13 +203,13 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         if (!row) return;
         if (row.active) return setStatus({ kind: "info", text: `"${row.name}" is already active.` });
         const r = run(() => engine.useSession(row.name));
-        if (r !== null) setStatus({ kind: "ok", text: `Switched to "${row.name}". Run \`${cliName}\` to use it.` });
+        if (r !== null) setStatus({ kind: "ok", text: `Switched to "${row.name}". ${switchFollowUp()}` });
         return;
       }
       if (char === "b") {
         const r = run(() => engine.switchToBest());
         if (r) {
-          if (r.switched) setStatus({ kind: "ok", text: `Best: "${r.name}" — 5h ${Math.round(r.primaryFree!)}% free, weekly ${Math.round(r.secondaryFree!)}% free.` });
+          if (r.switched) setStatus({ kind: "ok", text: `Best: "${r.name}" — 5h ${Math.round(r.primaryFree!)}% free. ${switchFollowUp()}` });
           else if (r.alreadyActive) setStatus({ kind: "info", text: `"${r.name}" is already best & active.` });
           else if (r.allExhausted) setStatus({ kind: "info", text: r.soonest ? `All exhausted. "${r.soonest.name}" resets soonest.` : "All sessions exhausted." });
         }

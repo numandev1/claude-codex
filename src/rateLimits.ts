@@ -25,7 +25,10 @@ export function effectiveUsedPercent(
   now = nowSec(),
 ): number | null {
   if (!window || typeof window.used_percent !== "number") return null;
-  if (typeof window.resets_at === "number" && window.resets_at <= now) return 0;
+  // resets_at of 0 means "unknown" (the API omitted it), not "expired".
+  if (typeof window.resets_at === "number" && window.resets_at > 0 && window.resets_at <= now) {
+    return 0;
+  }
   return window.used_percent;
 }
 
@@ -41,7 +44,7 @@ export function remaining(
 
 /** Human reset string for a window. */
 export function formatReset(window: RateWindow | null | undefined, now = nowSec()): string {
-  if (!window || typeof window.resets_at !== "number") return "";
+  if (!window || typeof window.resets_at !== "number" || window.resets_at <= 0) return "";
   const delta = window.resets_at - now;
   if (delta <= 0) return "reset";
   const d = Math.floor(delta / 86400);
