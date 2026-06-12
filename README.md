@@ -1,6 +1,10 @@
 <div align="center">
+ <img height="300" src="/assets/logo.png" />
+</div>
 
-# ⚡ Claude / Codex Session Manager — Switch & Borrow Accounts
+<div align="center">
+
+# Claude / Codex Session Manager — Switch & Borrow Accounts
 
 **One keystroke to switch between all your Codex and Claude Code logins, see which account still has quota — and borrow a friend's Codex / Claude without ever knowing their password.**
 
@@ -158,12 +162,11 @@ to paste and name it. Tokens are provider-tagged — a Codex token can't be impo
   - **Claude Code** → the `Claude Code-credentials` entry (macOS Keychain)
 - **Switching** restores a snapshot over the live credentials. The outgoing session is re-synced
   first, so rotated refresh tokens are never lost.
-- **Switching mid-session: Claude Code hot-swaps, Codex needs a restart.** Claude Code re-reads
-  the keychain, so a running `claude` session picks up the new account on its own. Codex loads
-  `auth.json` once at startup and keeps it in memory ([openai/codex#17041](https://github.com/openai/codex/issues/17041)),
-  so claudecodex warns you when it detects running `codex` processes after a switch. Your
-  conversation isn't lost: close the running Codex, switch, then pick the chat back up under the
-  new account with `codex resume --last`.
+- **Switching while Codex / Claude is running doesn't affect the running session** — both CLIs
+  load credentials once at startup and keep them in memory ([openai/codex#17041](https://github.com/openai/codex/issues/17041)).
+  claudecodex warns you when it detects running processes after a switch. Your conversation isn't
+  lost: close the running CLI, switch, then pick the chat back up under the new account with
+  `codex resume --last` (Codex) or `claude --continue` (Claude Code).
 - **Live limits, per account, without switching:**
   - Codex → `chatgpt.com/backend-api/wham/usage` (`primary` = 5h, `secondary` = weekly)
   - Claude → `api.anthropic.com/api/oauth/usage` (`five_hour` + `seven_day`)
