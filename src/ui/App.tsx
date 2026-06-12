@@ -6,7 +6,7 @@ import type { DashboardRow } from "../dashboard.js";
 import { Engine } from "../engine.js";
 import { copyToClipboard, pasteFromClipboard } from "../clipboard.js";
 import { runRemoteLoginFlow } from "../remote.js";
-import { runningProcessCount, RESUME_HINT, HOT_SWAP } from "../liveProcess.js";
+import { runningProcessCount, RESUME_HINT } from "../liveProcess.js";
 import type { Registry } from "../types.js";
 
 type Mode = "menu" | "save" | "rename" | "confirmDelete" | "acceptName" | "loginCode";
@@ -22,10 +22,10 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   const cliName = p.id === "codex" ? "codex" : "claude";
 
   // After a switch: plain "run it" hint, or a warning when the CLI is still
-  // running (Codex keeps the previous account's token until restarted;
-  // Claude Code hot-swaps from the keychain, so no warning needed).
+  // running (both Codex and Claude Code keep the previous account's
+  // credentials in memory until the process restarts).
   const switchFollowUp = () => {
-    const n = HOT_SWAP[p.id] ? 0 : runningProcessCount(p.id);
+    const n = runningProcessCount(p.id);
     if (n === 0) return `Run \`${cliName}\` to use it.`;
     return `⚠ ${n} running ${cliName} ${n === 1 ? "process keeps" : "processes keep"} the old account — restart, then \`${RESUME_HINT[p.id] ?? cliName}\` to continue your chat.`;
   };

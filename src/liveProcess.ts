@@ -7,17 +7,6 @@ export const RESUME_HINT: Record<string, string> = {
 };
 
 /**
- * Whether a provider's running CLI picks up swapped credentials without a
- * restart. Claude Code re-reads the keychain, so it hot-swaps; Codex loads
- * auth.json once at startup and keeps it in memory until the process exits
- * (openai/codex#17041).
- */
-export const HOT_SWAP: Record<string, boolean> = {
-  codex: false,
-  claude: true,
-};
-
-/**
  * Count running CLI processes for a provider (exact basename match, so IDE
  * extension instances count too — they hold the old token just the same).
  * Best-effort: returns 0 on platforms/setups where detection isn't possible.
@@ -41,7 +30,6 @@ export function runningProcessCount(providerId: string): number {
  * switch only fully takes effect once those processes restart.
  */
 export function midSwitchWarning(providerId: string): string | null {
-  if (HOT_SWAP[providerId]) return null;
   const n = runningProcessCount(providerId);
   if (n === 0) return null;
   const what = n === 1 ? `a ${providerId} process is` : `${n} ${providerId} processes are`;
