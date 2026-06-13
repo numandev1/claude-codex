@@ -123,8 +123,20 @@ export class Engine {
       throw new Error(`No saved session named "${name}".`);
     }
     const live = this.provider.readLiveAuth();
-    if (live && registry.active && registry.active !== name && registry.sessions[registry.active]) {
-      this.store.writeSnapshot(registry.active, live); // preserve rotated tokens
+    const outgoing = registry.active;
+    if (live && outgoing && outgoing !== name && registry.sessions[outgoing]) {
+      // Preserve rotated tokens — but only when the live credentials verifiably
+      // belong to the outgoing session. If the registry's `active` is stale or
+      // ambiguous (e.g. org-mates sharing a fingerprint), writing the live blob
+      // would overwrite that session's account with a different one.
+      const meta = registry.sessions[outgoing];
+      const fp = this.provider.fingerprint(live);
+      const liveEmail = this.provider.describeAuth(live).email;
+      const fpMatches = !!fp && fp === meta.fingerprint;
+      const emailMatches = !liveEmail || !meta.email || liveEmail === meta.email;
+      if (fpMatches && emailMatches) {
+        this.store.writeSnapshot(outgoing, live);
+      }
     }
     this.provider.writeLiveAuth(this.store.readSnapshot(name));
     registry.active = name;
