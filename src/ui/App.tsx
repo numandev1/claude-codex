@@ -38,7 +38,11 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
 
   const [registry, setRegistry] = useState<Registry>(() => engine.syncFromDisk().registry);
   const [unsaved, setUnsaved] = useState<boolean>(() => p.isLoggedIn() && !registry.active);
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useState(() => {
+    const names = Object.keys(registry.sessions);
+    const idx = registry.active ? names.indexOf(registry.active) : -1;
+    return idx >= 0 ? idx : 0;
+  });
   const [mode, setMode] = useState<Mode>("menu");
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>(null);
@@ -224,6 +228,14 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         setInput(suggestName()); setStatus(null); setMode("save"); return;
       }
       if (char === "r") return void doRemoteSession();
+      if (char === "i") {
+        const row = currentRow();
+        if (!row) return;
+        if (!engine.supportsIncognito) return setStatus({ kind: "err", text: `${p.label} does not support incognito sessions.` });
+        engine.pendingIncognito = { name: row.name, args: [] };
+        exit();
+        return;
+      }
       if (char === "n") { const row = currentRow(); if (!row) return; setInput(row.name); setStatus(null); setMode("rename"); return; }
       if (char === "d") { if (!currentRow()) return; setStatus(null); setMode("confirmDelete"); return; }
       if (char === "R") { setStatus({ kind: "info", text: "Refreshing…" }); void doRefresh().then(() => setStatus({ kind: "ok", text: "Limits updated." })); return; }
@@ -317,7 +329,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>↑/↓ select · enter switch · [b]est · [g]et-new · [s]ave · [r]emote-link</Text>
           <Text dimColor>
-            [c]opy-token · [a]ccept-token · [n]ame(rename) · [d]elete · [R]efresh ·{" "}
+            [c]opy-token · [a]ccept-token · [n]ame(rename) · [d]elete · [i]ncognito · [R]efresh ·{" "}
             {onBack ? "[q] back to providers" : "[q]uit"}
           </Text>
         </Box>

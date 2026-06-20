@@ -1,3 +1,5 @@
+import path from "node:path";
+import { spawn } from "node:child_process";
 import { Store } from "./store.js";
 import { pickBest, soonestReset, nowSec, type SoonestReset } from "./rateLimits.js";
 import type { Provider, LoginOptions, LoginResult } from "./providers/provider.js";
@@ -31,6 +33,8 @@ export interface SyncResult {
 /** All session operations for one provider, bound to its store + live login. */
 export class Engine {
   readonly store: Store;
+  /** Set by the TUI when the user presses [i]; cli.ts runs it after Ink exits. */
+  pendingIncognito: { name: string; args: string[] } | null = null;
   constructor(readonly provider: Provider) {
     this.store = new Store(provider.stateDir);
   }
@@ -39,26 +43,56 @@ export class Engine {
     return this.store.loadRegistry();
   }
 
+  /** Find the name of an existing session whose stored email matches the given address. */
+  findExistingByEmail(email: string): string | null {
+    const registry = this.store.loadRegistry();
+    const match = Object.entries(registry.sessions).find(([, meta]) => meta.email === email);
+    return match ? match[0] : null;
+  }
+
+  /** Keep registry metadata in sync after a snapshot write that may have rotated tokens. */
+  private resyncMeta(name: string, auth: SessionAuth): void {
+    const registry = this.store.loadRegistry();
+    if (!registry.sessions[name]) return;
+    const fp = this.provider.fingerprint(auth);
+    if (fp != null) registry.sessions[name].fingerprint = fp;
+    const d = this.provider.describeAuth(auth);
+    if (d.email) registry.sessions[name].email = d.email;
+    if (d.plan) registry.sessions[name].plan = d.plan;
+    if (d.accountId) registry.sessions[name].accountId = d.accountId;
+    this.store.saveRegistry(registry);
+  }
+
   private matchActive(registry: Registry, liveAuth: SessionAuth | null): string | null {
     const fp = this.provider.fingerprint(liveAuth);
-    if (!fp) return null;
-    const matches = Object.entries(registry.sessions).filter(
-      ([, meta]) => meta.fingerprint && meta.fingerprint === fp,
-    );
-    if (matches.length === 0) return null;
-    if (matches.length === 1) return matches[0][0];
-    // Fingerprint tie (e.g. Claude accounts in the same org share an org
-    // fingerprint): disambiguate by email, then keep the current active
-    // session rather than flipping to whichever happens to be listed first.
     const liveEmail = this.provider.describeAuth(liveAuth).email;
+
+    if (fp) {
+      const matches = Object.entries(registry.sessions).filter(
+        ([, meta]) => meta.fingerprint && meta.fingerprint === fp,
+      );
+      if (matches.length === 1) return matches[0][0];
+      if (matches.length > 1) {
+        // Fingerprint tie (e.g. Claude accounts in the same org share an org
+        // fingerprint): disambiguate by email, then keep the current active.
+        if (liveEmail) {
+          const byEmail = matches.find(([, meta]) => meta.email === liveEmail);
+          if (byEmail) return byEmail[0];
+        }
+        if (registry.active && matches.some(([name]) => name === registry.active)) {
+          return registry.active;
+        }
+        return matches[0][0];
+      }
+    }
+
+    // No fingerprint match → fall back to email comparison.
     if (liveEmail) {
-      const byEmail = matches.find(([, meta]) => meta.email === liveEmail);
+      const byEmail = Object.entries(registry.sessions).find(([, meta]) => meta.email === liveEmail);
       if (byEmail) return byEmail[0];
     }
-    if (registry.active && matches.some(([name]) => name === registry.active)) {
-      return registry.active;
-    }
-    return matches[0][0];
+
+    return null;
   }
 
   /** Reconcile registry with disk: which saved session is the live login? */
@@ -71,6 +105,13 @@ export class Engine {
       activeName = this.matchActive(registry, live);
       registry.active = activeName;
       unsaved = activeName === null;
+      // Repair a stale fingerprint so subsequent opens don't lose the match.
+      if (activeName) {
+        const liveFp = this.provider.fingerprint(live);
+        if (liveFp != null && registry.sessions[activeName]?.fingerprint !== liveFp) {
+          registry.sessions[activeName].fingerprint = liveFp;
+        }
+      }
     } else {
       registry.active = null;
     }
@@ -136,9 +177,16 @@ export class Engine {
       const emailMatches = !liveEmail || !meta.email || liveEmail === meta.email;
       if (fpMatches && emailMatches) {
         this.store.writeSnapshot(outgoing, live);
+        // Update outgoing fingerprint inline (single registry save below).
+        if (fp != null) registry.sessions[outgoing].fingerprint = fp;
       }
     }
-    this.provider.writeLiveAuth(this.store.readSnapshot(name));
+    const incoming = this.store.readSnapshot(name);
+    this.provider.writeLiveAuth(incoming);
+    // Keep stored fingerprint in sync with what was just written to the keychain
+    // so the next syncFromDisk can identify this session even after token rotation.
+    const incomingFp = this.provider.fingerprint(incoming);
+    if (incomingFp != null) registry.sessions[name].fingerprint = incomingFp;
     registry.active = name;
     registry.sessions[name].lastUsedAt = Date.now();
     this.store.saveRegistry(registry);
@@ -201,6 +249,7 @@ export class Engine {
 
     if (result.refreshedAuth) {
       this.store.writeSnapshot(name, result.refreshedAuth);
+      this.resyncMeta(name, result.refreshedAuth);
       registry = this.store.loadRegistry();
       if (registry.active === name) this.provider.writeLiveAuth(result.refreshedAuth);
     }
@@ -224,6 +273,77 @@ export class Engine {
     const outcomes: RefreshOutcome[] = [];
     for (const n of names) outcomes.push(await this.refreshSession(n));
     return outcomes;
+  }
+
+  // ---- incognito (isolated profile) ----
+  get supportsIncognito(): boolean {
+    return !!this.provider.incognito;
+  }
+
+  incognitoProfileDir(name: string): string {
+    return path.join(this.provider.stateDir, "profiles", name);
+  }
+
+  /**
+   * Run the provider's CLI on a saved session inside an isolated profile dir.
+   * The global login (and any running sessions using it) is never touched.
+   * Returns the CLI's exit code; rotated tokens are synced back afterwards.
+   */
+  async runIncognito(name: string, args: string[]): Promise<number> {
+    const iso = this.provider.incognito;
+    if (!iso) throw new Error(`${this.provider.label} does not support incognito sessions.`);
+    if (!this.store.loadRegistry().sessions[name] || !this.store.snapshotExists(name)) {
+      throw new Error(`No saved session named "${name}".`);
+    }
+
+    // Freshen tokens first — a stale access token inside the profile fails
+    // with a 401 instead of refreshing reliably.
+    const outcome = await this.refreshSession(name);
+    if (outcome.needsReauth) {
+      throw new Error(`Session "${name}" needs re-auth — run \`get-session\` or \`remote\` again.`);
+    }
+
+    const auth = this.store.readSnapshot(name);
+    const dir = this.incognitoProfileDir(name);
+    iso.seed(dir, auth);
+
+    // Snapshot the global live auth so we can restore it after the child exits.
+    // Some CLIs (Claude Code) write back refreshed tokens to the global credential
+    // store even when CLAUDE_CONFIG_DIR / CODEX_HOME is set, which corrupts the
+    // active-session fingerprint for every other session.
+    const globalAuthBackup = this.provider.readLiveAuth();
+
+    const code = await new Promise<number>((resolve, reject) => {
+      const child = spawn(iso.command, args, {
+        stdio: "inherit",
+        env: { ...process.env, ...iso.buildEnv(dir) },
+      });
+      // Ctrl+C goes to the foreground child via the shared TTY; the parent
+      // must survive it to sync tokens back after the child exits.
+      const onSignal = () => {};
+      process.on("SIGINT", onSignal);
+      process.on("SIGTERM", onSignal);
+      const cleanup = () => {
+        process.off("SIGINT", onSignal);
+        process.off("SIGTERM", onSignal);
+      };
+      child.on("error", (err) => {
+        cleanup();
+        reject(new Error(`Could not start \`${iso.command}\`: ${err.message}`));
+      });
+      child.on("exit", (exitCode) => {
+        cleanup();
+        resolve(exitCode ?? 0);
+      });
+    });
+
+    // Restore the global credential store in case the child process leaked
+    // its refreshed tokens into it (Claude Code does this even with CLAUDE_CONFIG_DIR).
+    if (globalAuthBackup) this.provider.writeLiveAuth(globalAuthBackup);
+
+    const updated = iso.collect(dir, auth);
+    if (updated) { this.store.writeSnapshot(name, updated); this.resyncMeta(name, updated); }
+    return code;
   }
 
   // ---- sharing ----
@@ -262,12 +382,22 @@ export class Engine {
     throw new Error("Token has no recognizable credentials (no tokens / claudeAiOauth).");
   }
 
-  importBlob(name: string, blob: string, { overwrite = false } = {}): void {
+  /** Returns the session name actually used (may differ from `name` if merged by email). */
+  importBlob(name: string, blob: string, { overwrite = false } = {}): string {
     const { providerId, auth } = this.decodeBlob(blob);
     if (providerId !== this.provider.id) {
       throw new Error(`That token is for "${providerId}", not "${this.provider.id}". Switch provider first.`);
     }
+    const d = this.provider.describeAuth(auth);
+    if (d.email) {
+      const existing = this.findExistingByEmail(d.email);
+      if (existing && existing !== name) {
+        this.persistSession(existing, auth, { overwrite: true, setActive: false });
+        return existing;
+      }
+    }
     this.persistSession(name, auth, { overwrite, setActive: false });
+    return name;
   }
 
   // ---- login ----
@@ -278,6 +408,14 @@ export class Engine {
   async getSession(opts: LoginOptions): Promise<LoginResult & { name: string }> {
     if (!this.provider.runLoginFlow) throw new Error(`${this.provider.label} login is not supported.`);
     const result = await this.provider.runLoginFlow(opts);
+    // If this email already has a saved session, update its tokens in-place.
+    if (result.email) {
+      const existing = this.findExistingByEmail(result.email);
+      if (existing) {
+        this.persistSession(existing, result.auth, { overwrite: true, setActive: false });
+        return { ...result, name: existing };
+      }
+    }
     const suggested =
       (result.email ? result.email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "") : "") ||
       `${this.provider.id}-${this.provider.fingerprint(result.auth)?.slice(-6) ?? "acct"}`;

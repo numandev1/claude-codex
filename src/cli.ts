@@ -26,6 +26,8 @@ Commands (per provider):
   ls                      Print the sessions dashboard (live limits)
   save [name]             Save the current login as a session
   use <name>              Switch the active login to a saved session
+  incognito <name>        Run codex/claude on a session in an ISOLATED profile —
+                          global login untouched, runs alongside other sessions
   best                    Switch to the session with the most remaining quota
   rename <old> <new>      Rename a session
   delete <name>           Delete a saved session
@@ -67,6 +69,11 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
       }
       const inst = render(React.createElement(App, { engine }));
       await inst.waitUntilExit();
+      if (engine.pendingIncognito) {
+        const { name, args } = engine.pendingIncognito;
+        console.log(`\nStarting isolated ${p.label} session "${name}" — the global login stays untouched.`);
+        process.exitCode = await engine.runIncognito(name, args);
+      }
       return;
     }
     case "ls":
@@ -87,6 +94,22 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
       await engine.refreshSession(name);
       console.log(`Saved current ${p.label} login as "${name}".`);
       console.log(renderPlainDashboard(engine.loadRegistry()));
+      break;
+    }
+    case "incognito":
+    case "iso": {
+      if (!args[0]) {
+        die(`Usage: claudecodex ${p.id} incognito <name> [args passed to ${p.id}…]`);
+      }
+      const [name, ...rest] = args;
+      try {
+        console.log(
+          `Starting isolated ${p.label} session "${name}" — the global login stays untouched.`,
+        );
+        process.exitCode = await engine.runIncognito(name, rest);
+      } catch (e) {
+        die((e as Error).message);
+      }
       break;
     }
     case "use":
@@ -153,12 +176,18 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
       const suggested =
         (remoteRes.email ? remoteRes.email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "") : "") ||
         args[0] || "remote-session";
-      engine.persistSession(suggested, remoteRes.auth as any, {
-        overwrite: !!engine.loadRegistry().sessions[suggested],
+      const existingByEmail = remoteRes.email ? engine.findExistingByEmail(remoteRes.email) : null;
+      const sessionName = existingByEmail ?? suggested;
+      engine.persistSession(sessionName, remoteRes.auth as any, {
+        overwrite: !!engine.loadRegistry().sessions[sessionName],
         setActive: false,
       });
-      await engine.refreshSession(suggested);
-      console.log(`\nSaved "${suggested}" (${remoteRes.email ?? "unknown"} · ${remoteRes.plan ?? "?"}).`);
+      await engine.refreshSession(sessionName);
+      if (existingByEmail) {
+        console.log(`\nMerged into existing session "${sessionName}" (${remoteRes.email ?? "unknown"} · ${remoteRes.plan ?? "?"}).`);
+      } else {
+        console.log(`\nSaved "${sessionName}" (${remoteRes.email ?? "unknown"} · ${remoteRes.plan ?? "?"}).`);
+      }
       console.log("\n" + renderPlainDashboard(engine.loadRegistry()));
       break;
     }
@@ -212,10 +241,15 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
           raw = fs.readFileSync(0, "utf8"); // piped input
         }
       }
-      try { engine.importBlob(args[0], raw, { overwrite: !!engine.loadRegistry().sessions[args[0]] }); }
+      let actualName: string;
+      try { actualName = engine.importBlob(args[0], raw, { overwrite: !!engine.loadRegistry().sessions[args[0]] }); }
       catch (e) { die((e as Error).message); }
-      await engine.refreshSession(args[0]);
-      console.log(`Imported session "${args[0]}".`);
+      await engine.refreshSession(actualName!);
+      if (actualName! !== args[0]) {
+        console.log(`Merged into existing session "${actualName!}" (same email as "${args[0]}").`);
+      } else {
+        console.log(`Imported session "${actualName!}".`);
+      }
       console.log(renderPlainDashboard(engine.loadRegistry()));
       break;
     }
@@ -245,8 +279,16 @@ async function main(): Promise<void> {
       console.log(HELP);
       return;
     }
-    const inst = render(React.createElement(Root));
+    const engineRef: { current: import("./engine.js").Engine | null } = { current: null };
+    const inst = render(React.createElement(Root, { engineRef }));
     await inst.waitUntilExit();
+    const chosenEngine = engineRef.current;
+    if (chosenEngine?.pendingIncognito) {
+      const { name, args } = chosenEngine.pendingIncognito;
+      const lbl = chosenEngine.provider.label;
+      console.log(`\nStarting isolated ${lbl} session "${name}" — the global login stays untouched.`);
+      process.exitCode = await chosenEngine.runIncognito(name, args);
+    }
     return;
   }
 

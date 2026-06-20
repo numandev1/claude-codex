@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { providerStateDir } from "../paths.js";
@@ -190,7 +192,19 @@ export const claudeProvider: Provider = {
       if (retry.status !== 200) return { rateLimits: null, refreshedAuth: blob, needsReauth: true };
       return { rateLimits: normalizeUsage(retry.body, plan), refreshedAuth: blob };
     }
-    if (status !== 200) return { rateLimits: null, error: `HTTP ${status}` };
+    if (status !== 200) {
+      // Usage API may rate-limit (429) before checking auth. If the local token
+      // is already past its expiresAt, refresh proactively so incognito seeding
+      // and future requests don't use a stale access token.
+      const exp = blob.claudeAiOauth?.expiresAt;
+      if (exp && exp < Date.now()) {
+        const refreshed = await refreshToken(blob);
+        if (refreshed) return { rateLimits: null, refreshedAuth: refreshed };
+        // Token expired and refresh token rejected → session is dead
+        return { rateLimits: null, needsReauth: true };
+      }
+      return { rateLimits: null, error: `HTTP ${status}` };
+    }
     return { rateLimits: normalizeUsage(body, plan) };
   },
 
@@ -268,5 +282,35 @@ export const claudeProvider: Provider = {
     if (email) (blob as any).email = email;
 
     return { auth: blob as SessionAuth, email, plan: blob.claudeAiOauth?.subscriptionType || null };
+  },
+
+  // Claude Code honours CLAUDE_CONFIG_DIR: with it set, credentials live in
+  // <dir>/.credentials.json (no global keychain entry involved), and all
+  // state (settings, project trust, history) stays inside the profile.
+  incognito: {
+    command: "claude",
+    buildEnv: (profileDir: string) => ({ CLAUDE_CONFIG_DIR: profileDir }),
+    seed(profileDir: string, auth: SessionAuth): void {
+      const blob = auth as ClaudeBlob;
+      fs.mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        path.join(profileDir, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: blob.claudeAiOauth }),
+        { mode: 0o600 },
+      );
+    },
+    collect(profileDir: string, seeded: SessionAuth): SessionAuth | null {
+      try {
+        const cred = JSON.parse(
+          fs.readFileSync(path.join(profileDir, ".credentials.json"), "utf8"),
+        );
+        if (!cred?.claudeAiOauth?.accessToken) return null;
+        // Keep identity fields (email, organizationUuid) from the snapshot;
+        // only the OAuth tokens rotate inside the profile.
+        return { ...(seeded as ClaudeBlob), claudeAiOauth: cred.claudeAiOauth } as SessionAuth;
+      } catch {
+        return null;
+      }
+    },
   },
 };

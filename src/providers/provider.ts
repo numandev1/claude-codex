@@ -24,6 +24,23 @@ export interface LoginOptions {
 }
 
 /**
+ * Support for running a session in an isolated profile directory ("incognito"):
+ * the provider's CLI is launched with its home/config redirected, so it uses
+ * the session's own credentials without touching the global login that other
+ * running sessions depend on.
+ */
+export interface IncognitoSupport {
+  /** Binary to spawn (assumed on PATH). */
+  command: string;
+  /** Env vars that redirect the CLI to the profile dir. */
+  buildEnv(profileDir: string): Record<string, string>;
+  /** Write the session's credentials (and any config) into the profile dir. */
+  seed(profileDir: string, auth: SessionAuth): void;
+  /** Read rotated credentials back out of the profile dir after the CLI exits. */
+  collect(profileDir: string, seeded: SessionAuth): SessionAuth | null;
+}
+
+/**
  * A login backend (Codex or Claude Code). It knows how to read/write the live
  * credentials, identify and describe an account, fetch its live 5h/weekly
  * usage, and (optionally) run a browser login to add a new account.
@@ -46,4 +63,7 @@ export interface Provider {
 
   readonly supportsLogin: boolean;
   runLoginFlow?(opts: LoginOptions): Promise<LoginResult>;
+
+  /** Present when the provider's CLI can run in an isolated profile. */
+  readonly incognito?: IncognitoSupport;
 }
