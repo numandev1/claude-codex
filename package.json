@@ -1,6 +1,6 @@
 {
   "name": "claudecodex-cli",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Manage multiple Codex and Claude Code logins as named sessions, with a live sticky dashboard of remaining 5-hour and weekly limits.",
   "type": "module",
   "bin": {
