@@ -50,6 +50,36 @@ export class Engine {
     return match ? match[0] : null;
   }
 
+  /**
+   * Purge duplicate sessions that share an email address, keeping the one
+   * with the most recent lastUsedAt. Called automatically in syncFromDisk so
+   * stale duplicates are removed on every startup.
+   */
+  private purgeDuplicates(registry: Registry): boolean {
+    const byEmail: Record<string, string[]> = {};
+    for (const [name, meta] of Object.entries(registry.sessions)) {
+      if (meta.email) (byEmail[meta.email] ??= []).push(name);
+    }
+    let changed = false;
+    for (const names of Object.values(byEmail)) {
+      if (names.length <= 1) continue;
+      // Keep the most recently used; fall back to savedAt.
+      names.sort(
+        (a, b) =>
+          (registry.sessions[b].lastUsedAt ?? registry.sessions[b].savedAt ?? 0) -
+          (registry.sessions[a].lastUsedAt ?? registry.sessions[a].savedAt ?? 0),
+      );
+      const [keep, ...dupes] = names;
+      for (const dupe of dupes) {
+        try { this.store.deleteSnapshot(dupe); } catch { /* already gone */ }
+        delete registry.sessions[dupe];
+        if (registry.active === dupe) registry.active = keep;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   /** Keep registry metadata in sync after a snapshot write that may have rotated tokens. */
   private resyncMeta(name: string, auth: SessionAuth): void {
     const registry = this.store.loadRegistry();
@@ -98,6 +128,8 @@ export class Engine {
   /** Reconcile registry with disk: which saved session is the live login? */
   syncFromDisk(): SyncResult {
     const registry = this.store.loadRegistry();
+    // Clean up duplicates accumulated before this guard was in place.
+    if (this.purgeDuplicates(registry)) this.store.saveRegistry(registry);
     const live = this.provider.readLiveAuth();
     let activeName: string | null = null;
     let unsaved = false;
@@ -132,13 +164,41 @@ export class Engine {
     };
   }
 
-  /** Persist an auth blob as a named session. */
+  /**
+   * Persist an auth blob as a named session.
+   * Returns the name actually used — may differ from `name` when the email
+   * already exists under a different entry (the existing entry is updated in
+   * place and `name` is discarded, preventing duplicate rows).
+   */
   persistSession(
     name: string,
     auth: SessionAuth,
     { overwrite = false, setActive = false } = {},
-  ): void {
+  ): string {
     const registry = this.store.loadRegistry();
+
+    // Email dedup: if this account is already saved under a *different* name,
+    // update that entry instead of creating a parallel one.
+    const d = this.provider.describeAuth(auth);
+    if (d.email && !registry.sessions[name]) {
+      const existing = Object.entries(registry.sessions).find(
+        ([n, meta]) => n !== name && meta.email === d.email,
+      );
+      if (existing) {
+        const [existingName, existingMeta] = existing;
+        this.store.writeSnapshot(existingName, auth);
+        const base = this.describeMeta(auth, existingMeta);
+        registry.sessions[existingName] = {
+          ...base,
+          label: existingMeta.label || base.label || existingName,
+          rateLimits: existingMeta.rateLimits ?? null,
+        };
+        if (setActive) registry.active = existingName;
+        this.store.saveRegistry(registry);
+        return existingName;
+      }
+    }
+
     if (this.store.snapshotExists(name) && !overwrite) {
       throw new Error(`Session "${name}" already exists. Choose another name or overwrite.`);
     }
@@ -148,6 +208,7 @@ export class Engine {
     registry.sessions[name] = { ...base, label: base.label || name, rateLimits: prev?.rateLimits ?? null };
     if (setActive) registry.active = name;
     this.store.saveRegistry(registry);
+    return name;
   }
 
   /** Save the current live login as a named session. */
