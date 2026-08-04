@@ -211,11 +211,11 @@ export class Engine {
     return name;
   }
 
-  /** Save the current live login as a named session. */
-  saveCurrent(name: string, { overwrite = false } = {}): void {
+  /** Save the current live login as a named session. Returns the name actually used. */
+  saveCurrent(name: string, { overwrite = false } = {}): string {
     const live = this.provider.readLiveAuth();
     if (!live) throw new Error(`Not logged in to ${this.provider.label}. Log in first, then save.`);
-    this.persistSession(name, live, { overwrite, setActive: true });
+    return this.persistSession(name, live, { overwrite, setActive: true });
   }
 
   /** Switch the live login to a saved session (re-syncs the outgoing one first). */

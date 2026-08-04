@@ -7,6 +7,8 @@ import { Engine } from "../engine.js";
 import { copyToClipboard, pasteFromClipboard } from "../clipboard.js";
 import { runRemoteLoginFlow } from "../remote.js";
 import { runningProcessCount, RESUME_HINT, HOT_SWAP } from "../liveProcess.js";
+import { buildDashboard } from "../dashboard.js";
+import { isExhausted } from "../rateLimits.js";
 import type { Registry } from "../types.js";
 
 type Mode = "menu" | "save" | "rename" | "confirmDelete" | "acceptName" | "loginCode";
@@ -64,8 +66,17 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
     const reg = engine.loadRegistry();
     setRegistry(reg);
     setUnsaved(p.isLoggedIn() && !reg.active);
-    const count = Object.keys(reg.sessions).length;
-    setSelected((s) => Math.max(0, Math.min(s, Math.max(0, count - 1))));
+    // Keep the cursor on the same session by name after a reorder (sessions
+    // shift position as their quota changes on each 60s refresh).
+    const newRows = buildDashboard(reg).rows;
+    setSelected((s) => {
+      const currentName = rowsRef.current[s]?.name;
+      if (currentName) {
+        const newIdx = newRows.findIndex((r) => r.name === currentName);
+        if (newIdx >= 0) return newIdx;
+      }
+      return Math.max(0, Math.min(s, Math.max(0, newRows.length - 1)));
+    });
   }, [engine, p]);
 
   const refreshInFlight = useRef(false);
@@ -77,7 +88,23 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
     reload();
     setRefreshing(false);
     refreshInFlight.current = false;
-  }, [engine, reload]);
+
+    // Auto-switch: Claude hot-swaps credentials, so when the active session
+    // exhausts we can silently move to the best without the user needing to act.
+    if (HOT_SWAP[p.id]) {
+      try {
+        const reg = engine.loadRegistry();
+        const prev = reg.active;
+        if (prev && isExhausted(reg.sessions[prev]?.rateLimits)) {
+          const r = engine.switchToBest();
+          if (r.switched) {
+            reload();
+            setStatus({ kind: "ok", text: `Auto-switched to "${r.name}" — "${prev}" is exhausted.` });
+          }
+        }
+      } catch { /* tolerate */ }
+    }
+  }, [engine, p, reload]);
 
   useEffect(() => { void doRefresh(); }, [doRefresh]);
 
@@ -181,9 +208,9 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
       });
       cancelLogin.current = null;
       const suggested = res.email ? res.email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "") : "remote-session";
-      engine.persistSession(suggested, res.auth as any, { overwrite: !!engine.loadRegistry().sessions[suggested], setActive: false });
+      const actualName = engine.persistSession(suggested, res.auth as any, { overwrite: !!engine.loadRegistry().sessions[suggested], setActive: false });
       reload();
-      setStatus({ kind: "ok", text: `Remote session saved as "${suggested}". Fetching limits…` });
+      setStatus({ kind: "ok", text: `Remote session saved as "${actualName}". Fetching limits…` });
       void doRefresh();
     } catch (err) {
       cancelLogin.current = null;
@@ -261,14 +288,14 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
         if (!/^[a-zA-Z0-9_.-]+$/.test(name)) return setStatus({ kind: "err", text: "Use only letters, digits, _ . -" });
         const exists = !!registry.sessions[name];
         if (mode === "save") {
-          const r = run(() => engine.saveCurrent(name, { overwrite: exists }));
-          if (r !== null) { setStatus({ kind: "ok", text: `Saved as "${name}". Fetching limits…` }); void doRefresh(); }
+          const actualName = run(() => engine.saveCurrent(name, { overwrite: exists }));
+          if (actualName !== null) { setStatus({ kind: "ok", text: `Saved as "${actualName}". Fetching limits…` }); void doRefresh(); }
         } else if (mode === "rename") {
           const row = currentRow();
           if (row) { const r = run(() => engine.rename(row.name, name)); if (r !== null) setStatus({ kind: "ok", text: `Renamed "${row.name}" → "${name}".` }); }
         } else if (mode === "acceptName") {
           const raw = pendingBlob.current;
-          if (raw) { const r = run(() => engine.importBlob(name, raw, { overwrite: exists })); if (r !== null) { setStatus({ kind: "ok", text: `Accepted as "${name}". Fetching limits…` }); void doRefresh(); } }
+          if (raw) { const r = run(() => engine.importBlob(name, raw, { overwrite: exists })); if (r !== null) { setStatus({ kind: "ok", text: `Accepted as "${r}". Fetching limits…` }); void doRefresh(); } }
           pendingBlob.current = null;
         }
         setMode("menu"); setInput(""); return;
