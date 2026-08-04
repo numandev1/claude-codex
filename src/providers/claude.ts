@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { providerStateDir } from "../paths.js";
+import { atomicWrite } from "../fsutil.js";
 import { openBrowser } from "../login.js";
 import type { AuthDescription, RateLimits, SessionAuth } from "../types.js";
 import type { LiveUsageResult, LoginOptions, LoginResult, Provider } from "./provider.js";
@@ -32,6 +33,19 @@ interface ClaudeBlob {
   mcpOAuth?: unknown;
   [k: string]: unknown;
 }
+
+/**
+ * Where Claude Code keeps the live login, per platform.
+ *
+ * macOS stores it in the login keychain. Linux and Windows have no keychain to
+ * talk to — Claude Code writes `~/.claude/.credentials.json` instead, the same
+ * shape the `incognito` seed below already produces for CLAUDE_CONFIG_DIR.
+ * `security` is a macOS binary, so calling it elsewhere throws
+ * `spawnSync security ENOENT`, which took out every command that writes the live
+ * login (`use`, `best`, `save` round-trips) on non-Darwin hosts.
+ */
+const CLAUDE_CREDENTIALS_FILE = path.join(os.homedir(), ".claude", ".credentials.json");
+const HAS_KEYCHAIN = process.platform === "darwin";
 
 function keychainAccount(): string {
   try {
@@ -71,6 +85,44 @@ function writeKeychain(blob: ClaudeBlob): void {
     "-w",
     json,
   ]);
+}
+
+function readCredentialsFile(): ClaudeBlob | null {
+  try {
+    const raw = fs.readFileSync(CLAUDE_CREDENTIALS_FILE, "utf8");
+    return JSON.parse(raw) as ClaudeBlob;
+  } catch {
+    return null;
+  }
+}
+
+function writeCredentialsFile(blob: ClaudeBlob): void {
+  atomicWrite(CLAUDE_CREDENTIALS_FILE, JSON.stringify(blob, null, 2) + "\n", { secret: true });
+}
+
+/** Read the live Claude login from wherever this platform keeps it. */
+function readLiveClaudeAuth(): ClaudeBlob | null {
+  if (HAS_KEYCHAIN) {
+    const fromKeychain = readKeychain();
+    if (fromKeychain) return fromKeychain;
+    // Fall through: a Linux-provisioned home synced to a Mac, or a Claude Code
+    // build that wrote the file rather than the keychain, still resolves.
+  }
+  return readCredentialsFile();
+}
+
+/** Replace the live Claude login. */
+function writeLiveClaudeAuth(blob: ClaudeBlob): void {
+  if (HAS_KEYCHAIN) {
+    try {
+      writeKeychain(blob);
+      return;
+    } catch {
+      // Keychain can refuse in CI, over SSH, or when the login keychain is
+      // locked. Writing the file is better than losing the session entirely.
+    }
+  }
+  writeCredentialsFile(blob);
 }
 
 function isoToEpochSec(iso: string | undefined): number {
@@ -150,12 +202,12 @@ export const claudeProvider: Provider = {
   supportsLogin: true,
 
   isLoggedIn(): boolean {
-    const b = readKeychain();
+    const b = readLiveClaudeAuth();
     return !!b?.claudeAiOauth?.accessToken;
   },
 
-  readLiveAuth: () => readKeychain() as SessionAuth | null,
-  writeLiveAuth: (auth: SessionAuth) => writeKeychain(auth as ClaudeBlob),
+  readLiveAuth: () => readLiveClaudeAuth() as SessionAuth | null,
+  writeLiveAuth: (auth: SessionAuth) => writeLiveClaudeAuth(auth as ClaudeBlob),
 
   describeAuth(auth: SessionAuth | null): AuthDescription {
     const b = auth as ClaudeBlob | null;
