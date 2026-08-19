@@ -132,7 +132,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
       const res = await new Promise<Awaited<ReturnType<typeof engine.getSession>>>((resolve, reject) => {
         cancelLogin.current = () => reject(new Error("Login cancelled."));
         engine.getSession({
-          onUrl: (u) => setStatus({ kind: "info", text: `Sign in in the browser…  ${u.slice(0, 54)}…  (esc = cancel)` }),
+          onUrl: (u) => setStatus({ kind: "info", text: `Sign in in the browser…  ${u}  (esc = cancel)` }),
           promptCode: (instr) =>
             new Promise<string>((resolveCode) => {
               codeResolver.current = resolveCode;
