@@ -137,12 +137,20 @@ export class Engine {
       activeName = this.matchActive(registry, live);
       registry.active = activeName;
       unsaved = activeName === null;
-      // Repair a stale fingerprint so subsequent opens don't lose the match.
       if (activeName) {
+        const meta = registry.sessions[activeName];
         const liveFp = this.provider.fingerprint(live);
-        if (liveFp != null && registry.sessions[activeName]?.fingerprint !== liveFp) {
-          registry.sessions[activeName].fingerprint = liveFp;
-        }
+        const liveEmail = this.provider.describeAuth(live).email;
+        // The live login is the newest credential for this account (the CLI may
+        // have re-authenticated since the snapshot was taken), so adopt it —
+        // but only on a per-account match. An org-wide fingerprint is shared by
+        // colleagues and must not overwrite one person's session with another's.
+        const sameAccount =
+          (!!liveEmail && liveEmail === meta.email) ||
+          (!!liveFp && liveFp === meta.fingerprint && !liveFp.startsWith("org:"));
+        if (sameAccount) this.store.writeSnapshot(activeName, live);
+        // Repair a stale fingerprint so subsequent opens don't lose the match.
+        if (liveFp != null && meta.fingerprint !== liveFp) meta.fingerprint = liveFp;
       }
     } else {
       registry.active = null;
@@ -316,10 +324,22 @@ export class Engine {
     }
     registry = this.store.loadRegistry();
     if (!registry.sessions[name]) return { name, ok: false, error: "session removed" };
+    const meta = registry.sessions[name];
+    meta.checkedAt = Date.now();
     if (result.rateLimits) {
-      registry.sessions[name].rateLimits = { ...result.rateLimits, capturedAt: Date.now(), source: "live" };
+      meta.rateLimits = { ...result.rateLimits, capturedAt: Date.now(), source: "live" };
+      meta.authState = "ok";
+      delete meta.lastError;
       this.store.saveRegistry(registry);
       return { name, ok: true };
+    }
+    // Record the failure so the dashboard stops presenting old numbers as current.
+    if (result.needsReauth) {
+      meta.authState = "expired";
+      delete meta.lastError;
+    } else {
+      meta.authState = "error";
+      meta.lastError = result.error || "no usage data returned";
     }
     this.store.saveRegistry(registry);
     return { name, ok: false, needsReauth: result.needsReauth, error: result.error };

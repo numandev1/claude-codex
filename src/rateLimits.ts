@@ -95,6 +95,8 @@ export function pickBest(
   now = nowSec(),
 ): RankedSession | null {
   const candidates: RankedSession[] = sessions
+    // A session whose login the provider rejected cannot be switched to.
+    .filter(({ meta }) => meta.authState !== "expired")
     .map(({ name, meta }) => {
       const rl = meta.rateLimits || null;
       return {

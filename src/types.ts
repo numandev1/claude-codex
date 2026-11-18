@@ -45,6 +45,16 @@ export interface SessionMeta {
   savedAt: number;
   lastUsedAt: number;
   rateLimits: RateLimits | null;
+  /**
+   * Outcome of the most recent live check. "expired" = the provider rejected the
+   * login and it could not be refreshed, so stored limits no longer mean anything.
+   * Absent on sessions that have never been checked.
+   */
+  authState?: "ok" | "expired" | "error";
+  /** When that check ran (ms epoch). */
+  checkedAt?: number;
+  /** Why the last check failed, when authState is "error". */
+  lastError?: string;
 }
 
 export interface Registry {

@@ -53,11 +53,16 @@ function SessionRow({ row, selected, accent }: { row: DashboardRow; selected: bo
         {row.active ? <Text color="cyanBright">{"  ‹active›"}</Text> : null}
         {row.exhausted ? <Text color="black" backgroundColor="red" bold>{" FULL "}</Text> : null}
       </Box>
+      {row.note ? <Text color={row.expired ? "red" : "yellow"}>{`      ! ${row.note}`}</Text> : null}
+      {row.expired ? null : (
+      <>
       <WindowLine tag="5h" free={row.primaryFree} reset={row.primaryReset} exhausted={row.exhausted} />
       <Box>
         <WindowLine tag="7d" free={row.secondaryFree} reset={row.secondaryReset} exhausted={row.exhausted} />
         <Text dimColor>{`   ${row.ago}${row.source === "live" ? " · live" : ""}`}</Text>
       </Box>
+      </>
+      )}
     </Box>
   );
 }

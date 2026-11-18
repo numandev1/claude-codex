@@ -100,15 +100,39 @@ function writeCredentialsFile(blob: ClaudeBlob): void {
   atomicWrite(CLAUDE_CREDENTIALS_FILE, JSON.stringify(blob, null, 2) + "\n", { secret: true });
 }
 
+/**
+ * Who Claude Code itself says is signed in, from its own config file.
+ *
+ * The credentials blob carries no email of its own. This manager adds one when
+ * it writes a session, and Claude Code preserves that extra key when the user
+ * later signs in as someone else — leaving the blob labelled with the previous
+ * account. Claude Code's config is authoritative whenever it describes the same
+ * account as the credentials (matched by account id).
+ */
+function liveAccountEmail(blob: ClaudeBlob): string | null {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude.json"), "utf8"));
+    const acct = cfg?.oauthAccount;
+    const blobAccount = (blob.claudeAiOauth as any)?.accountUuid;
+    if (acct?.emailAddress && blobAccount && acct.accountUuid === blobAccount) {
+      return acct.emailAddress as string;
+    }
+  } catch {
+    /* no config, or unreadable — fall back to the blob */
+  }
+  return null;
+}
+
 /** Read the live Claude login from wherever this platform keeps it. */
 function readLiveClaudeAuth(): ClaudeBlob | null {
-  if (HAS_KEYCHAIN) {
-    const fromKeychain = readKeychain();
-    if (fromKeychain) return fromKeychain;
-    // Fall through: a Linux-provisioned home synced to a Mac, or a Claude Code
-    // build that wrote the file rather than the keychain, still resolves.
-  }
-  return readCredentialsFile();
+  let blob: ClaudeBlob | null = null;
+  if (HAS_KEYCHAIN) blob = readKeychain();
+  // Fall through: a Linux-provisioned home synced to a Mac, or a Claude Code
+  // build that wrote the file rather than the keychain, still resolves.
+  if (!blob) blob = readCredentialsFile();
+  if (!blob) return null;
+  const email = liveAccountEmail(blob);
+  return email ? { ...blob, email } : blob;
 }
 
 /** Replace the live Claude login. */
@@ -221,6 +245,10 @@ export const claudeProvider: Provider = {
   fingerprint(auth: SessionAuth | null): string | null {
     const b = auth as ClaudeBlob | null;
     if (!b?.claudeAiOauth) return null;
+    // Per-account id when the login carries one; the org id is shared by
+    // everyone in the same organization, so it is only a fallback.
+    const accountUuid = (b.claudeAiOauth as any).accountUuid;
+    if (accountUuid) return `acct:${accountUuid}`;
     if (b.organizationUuid) return `org:${b.organizationUuid}`;
     const rt = b.claudeAiOauth.refreshToken;
     return rt ? "rt:" + crypto.createHash("sha256").update(rt).digest("hex").slice(0, 16) : null;

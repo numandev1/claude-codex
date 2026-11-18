@@ -14,6 +14,7 @@ import { migrateLegacyCodex } from "./paths.js";
 import { maybePromptUpdate, currentVersion } from "./version.js";
 import { pasteFromClipboard } from "./clipboard.js";
 import { runRemoteLoginFlow } from "./remote.js";
+import { listProfiles, loginProfile, prepareProfile, profileEnv, profileStatus, runProfile } from "./profile.js";
 
 const HELP = `claudecodex v${currentVersion()} — manage multiple Codex and Claude Code logins as sessions
 
@@ -28,6 +29,12 @@ Commands (per provider):
   use <name>              Switch the active login to a saved session
   incognito <name>        Run codex/claude on a session in an ISOLATED profile —
                           global login untouched, runs alongside other sessions
+  run <profile> [args…]   Run codex/claude in an isolated PROFILE with its own login —
+                          sign in once inside it; no tokens are copied. Use a different
+                          profile per terminal to run several accounts side by side
+  env <profile>           Print the export line:  eval "$(claudecodex claude env work)"
+  profile-login <profile> Sign a profile in (or switch its account)
+  profiles                List isolated profiles and whether each has a stored login
   best                    Switch to the session with the most remaining quota
   rename <old> <new>      Rename a session
   delete <name>           Delete a saved session
@@ -94,6 +101,55 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
       await engine.refreshSession(name);
       console.log(`Saved current ${p.label} login as "${name}".`);
       console.log(renderPlainDashboard(engine.loadRegistry()));
+      break;
+    }
+    case "run": {
+      if (!args[0]) die(`Usage: claudecodex ${p.id} run <profile> [args passed to ${p.id}…]`);
+      const [name, ...rest] = args;
+      try {
+        const code = await runProfile(p.id, name, rest);
+        // A stored login can be expired or revoked while the CLI still reports
+        // it as present, so a failed run is the first sign — point at the fix.
+        if (code !== 0) {
+          console.error(`\n${p.id} exited with code ${code}. If that was a sign-in error, renew this profile's login with:\n  claudecodex ${p.id} profile-login ${name}`);
+        }
+        process.exitCode = code;
+      } catch (e) { die((e as Error).message); }
+      break;
+    }
+    case "env": {
+      if (!args[0]) die(`Usage: eval "$(claudecodex ${p.id} env <profile>)"`);
+      try {
+        prepareProfile(p.id, args[0]);
+        for (const [k, v] of Object.entries(profileEnv(p.id, args[0]))) {
+          console.log(`export ${k}='${v.replace(/'/g, "'\\''")}'`);
+        }
+      } catch (e) { die((e as Error).message); }
+      break;
+    }
+    case "profile-login": {
+      if (!args[0]) die(`Usage: claudecodex ${p.id} profile-login <profile>`);
+      try {
+        process.exitCode = await loginProfile(p.id, args[0]);
+      } catch (e) { die((e as Error).message); }
+      break;
+    }
+    case "profiles": {
+      const names = listProfiles(p.id);
+      if (!names.length) {
+        console.log(`No ${p.label} profiles yet — create one with: claudecodex ${p.id} run <profile>`);
+        break;
+      }
+      const width = Math.max(...names.map((n) => n.length));
+      for (const n of names) {
+        let line: string;
+        try {
+          const st = profileStatus(p.id, n);
+          line = st.loggedIn ? `login stored${st.detail ? `  (${st.detail})` : ""}` : "no login";
+        } catch (e) { line = `unknown — ${(e as Error).message}`; }
+        console.log(`${n.padEnd(width)}  ${line}`);
+      }
+      console.log(`\n"login stored" is what ${p.id} reports locally; it may still be expired. Renew with: claudecodex ${p.id} profile-login <profile>`);
       break;
     }
     case "incognito":

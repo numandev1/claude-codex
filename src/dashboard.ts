@@ -24,7 +24,14 @@ export interface DashboardRow {
   secondaryReset: string;
   ago: string;
   source: "live" | "rollout" | null;
+  /** The provider rejected this login — limits are not shown; sign in again. */
+  expired: boolean;
+  /** Set when the numbers on this row are not from a successful current check. */
+  note: string;
 }
+
+/** Limits this old say nothing about now once a live check has failed. */
+const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface DashboardModel {
   rows: DashboardRow[];
@@ -47,8 +54,19 @@ export function bar(freePercent: number | null | undefined): string {
  */
 export function buildDashboard(registry: Registry, now = nowSec()): DashboardModel {
   const rows: DashboardRow[] = Object.entries(registry.sessions).map(([name, meta]) => {
-    const rl = meta.rateLimits || null;
+    const expired = meta.authState === "expired";
+    const failed = meta.authState === "error";
+    const age = meta.rateLimits?.capturedAt ? now * 1000 - meta.rateLimits.capturedAt : Infinity;
+    // Old numbers are only trustworthy while live checks keep succeeding.
+    const rl = expired || (failed && age > STALE_AFTER_MS) ? null : meta.rateLimits || null;
+    const note = expired
+      ? "sign-in expired — sign in again"
+      : failed
+        ? `could not update (${meta.lastError || "error"})`
+        : "";
     return {
+      expired,
+      note,
       name,
       label: meta.email || meta.label || name,
       plan: meta.plan || "—",
@@ -60,11 +78,13 @@ export function buildDashboard(registry: Registry, now = nowSec()): DashboardMod
       primaryReset: rl ? formatReset(rl.primary, now) : "",
       secondaryReset: rl ? formatReset(rl.secondary, now) : "",
       ago: rl ? formatAgo(rl.capturedAt, now * 1000) : "no data yet",
-      source: rl?.source ?? null,
+      // "live" means the last check succeeded, not merely that the data once was live.
+      source: meta.authState === "ok" ? (rl?.source ?? null) : rl?.source === "rollout" ? "rollout" : null,
     };
   });
 
   rows.sort((a, b) => {
+    if (a.expired !== b.expired) return a.expired ? 1 : -1;
     if (a.exhausted !== b.exhausted) return a.exhausted ? 1 : -1;
     const ap = a.primaryFree ?? 100;
     const bp = b.primaryFree ?? 100;
@@ -75,8 +95,10 @@ export function buildDashboard(registry: Registry, now = nowSec()): DashboardMod
   });
 
   const total = rows.length;
-  const withHourly = rows.filter((r) => !r.exhausted && (r.primaryFree ?? 100) > 0).length;
-  const withWeekly = rows.filter((r) => !r.exhausted && (r.secondaryFree ?? 100) > 0).length;
+  // Only count headroom we actually know about on a usable login.
+  const usable = rows.filter((r) => !r.expired && !r.exhausted);
+  const withHourly = usable.filter((r) => r.primaryFree !== null && r.primaryFree > 0).length;
+  const withWeekly = usable.filter((r) => r.secondaryFree !== null && r.secondaryFree > 0).length;
 
   return { rows, summary: { total, withHourly, withWeekly } };
 }
@@ -104,6 +126,11 @@ export function renderPlainDashboard(registry: Registry, now = nowSec()): string
     const marker = r.active ? "●" : " ";
     const flag = r.exhausted ? "  FULL" : "";
     lines.push(`${marker} ${r.name}  (${r.label} · ${r.plan})${flag}`);
+    if (r.expired) {
+      lines.push(`    ! ${r.note}`);
+      continue;
+    }
+    if (r.note) lines.push(`    ! ${r.note}`);
     lines.push(
       `    5h ${bar(r.primaryFree)} ${pct(used(r.primaryFree))} used · ${pct(r.primaryFree)} free  ${r.primaryReset}`,
     );

@@ -99,6 +99,31 @@ ccx codex remote                 # generate a remote guide link for a friend
 ccx claude remote                # same for Claude
 ```
 
+## Run two accounts side by side (isolated profiles)
+
+A **profile** is a private home directory for one account. Sign in once inside it and it stays
+signed in; different terminals can run different profiles at the same time, and your normal
+global login is never touched. No tokens are copied — each profile uses the CLI's own login.
+
+```bash
+ccx claude run work              # terminal 1 — first launch shows Claude's sign-in screen
+ccx claude run personal          # terminal 2 — a different account, at the same time
+ccx codex run a                  # first launch runs `codex login` inside the profile
+ccx codex run b resume --last    # everything after the profile name goes to the CLI
+
+eval "$(ccx claude env work)"    # or: make this whole terminal use the profile
+ccx claude profiles              # list profiles and whether each has a stored login
+ccx codex profile-login a        # sign a profile in again / change its account
+```
+
+Profiles live in `~/.claudecodex/<provider>/profiles/<name>` and are driven through
+`CLAUDE_CONFIG_DIR` / `CODEX_HOME`. A new profile shares your existing setup: Claude's
+`settings.json`, `CLAUDE.md`, `agents`, `commands` and `skills` are symlinked, and Codex's
+`config.toml` is copied once. History and conversations stay per profile.
+
+A stored login can expire while the CLI still reports it as present. If a profile fails with a
+sign-in error, renew it with `ccx <provider> profile-login <name>`.
+
 ## Borrow Codex / Claude from a friend — without their password
 
 If a friend has a ChatGPT Plus or Claude Pro subscription but doesn't use Codex / Claude Code
