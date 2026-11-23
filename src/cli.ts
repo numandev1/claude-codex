@@ -9,7 +9,7 @@ import { Engine } from "./engine.js";
 import { getProvider, PROVIDERS } from "./providers/index.js";
 import { renderPlainDashboard } from "./dashboard.js";
 import { formatReset } from "./rateLimits.js";
-import { midSwitchWarning } from "./liveProcess.js";
+import { afterSwitch } from "./liveProcess.js";
 import { migrateLegacyCodex } from "./paths.js";
 import { maybePromptUpdate, currentVersion } from "./version.js";
 import { pasteFromClipboard } from "./clipboard.js";
@@ -32,6 +32,8 @@ Commands (per provider):
   run <profile> [args…]   Run codex/claude in an isolated PROFILE with its own login —
                           sign in once inside it; no tokens are copied. Use a different
                           profile per terminal to run several accounts side by side
+                          run <profile> --resume <id> also continues a conversation
+                          started in another profile (it is copied in first)
   env <profile>           Print the export line:  eval "$(claudecodex claude env work)"
   profile-login <profile> Sign a profile in (or switch its account)
   profiles                List isolated profiles and whether each has a stored login
@@ -173,7 +175,7 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
       if (!args[0]) die(`Usage: claudecodex ${p.id} use <name>`);
       try { engine.useSession(args[0]); } catch (e) { die((e as Error).message); }
       console.log(`Switched to "${args[0]}". Run ${p.id === "codex" ? "`codex`" : "`claude`"} to use it.`);
-      const warn = midSwitchWarning(p.id);
+      const warn = afterSwitch(p.id);
       if (warn) console.log(warn);
       break;
     }
@@ -184,7 +186,7 @@ async function runProviderCommand(engine: Engine, cmd: string | undefined, args:
         const r = engine.switchToBest();
         if (r.switched) {
           console.log(`Switched to best: "${r.name}" — 5h ${Math.round(r.primaryFree!)}% free, weekly ${Math.round(r.secondaryFree!)}% free.`);
-          const warn = midSwitchWarning(p.id);
+          const warn = afterSwitch(p.id);
           if (warn) console.log(warn);
         }
         else if (r.alreadyActive) console.log(`"${r.name}" is already the best and active.`);

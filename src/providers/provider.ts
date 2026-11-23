@@ -6,6 +6,10 @@ export interface LiveUsageResult {
   refreshedAuth?: SessionAuth;
   /** Token invalid and refresh failed → user must re-login / re-share. */
   needsReauth?: boolean;
+  /** The usage API throttled us (HTTP 429); the login itself is fine. */
+  rateLimited?: boolean;
+  /** Server-suggested wait before retrying (from Retry-After), when given. */
+  retryAfterMs?: number;
   error?: string;
 }
 
@@ -62,6 +66,12 @@ export interface Provider {
   fetchUsage(auth: SessionAuth): Promise<LiveUsageResult>;
 
   readonly supportsLogin: boolean;
+  /**
+   * Minimum gap between background usage checks of one session (ms). The
+   * provider's usage API may allow only a few calls per account; manual
+   * refreshes ignore this. Defaults to ~1 minute.
+   */
+  readonly usagePollMs?: number;
   runLoginFlow?(opts: LoginOptions): Promise<LoginResult>;
 
   /** Present when the provider's CLI can run in an isolated profile. */

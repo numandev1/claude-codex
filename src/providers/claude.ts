@@ -109,18 +109,47 @@ function writeCredentialsFile(blob: ClaudeBlob): void {
  * account. Claude Code's config is authoritative whenever it describes the same
  * account as the credentials (matched by account id).
  */
-function liveAccountEmail(blob: ClaudeBlob): string | null {
+const CLAUDE_CONFIG_FILE = path.join(os.homedir(), ".claude.json");
+/** Snapshot key holding the account record that belongs with the tokens. */
+const ACCOUNT_KEY = "ccxAccount";
+
+function readClaudeConfig(): any {
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude.json"), "utf8"));
-    const acct = cfg?.oauthAccount;
-    const blobAccount = (blob.claudeAiOauth as any)?.accountUuid;
-    if (acct?.emailAddress && blobAccount && acct.accountUuid === blobAccount) {
-      return acct.emailAddress as string;
-    }
+    return JSON.parse(fs.readFileSync(CLAUDE_CONFIG_FILE, "utf8"));
   } catch {
-    /* no config, or unreadable — fall back to the blob */
+    return null;
   }
-  return null;
+}
+
+/**
+ * Claude Code's account record, when it describes the same account as `blob`:
+ * matched by account id, or — for a login that carries no account id — by the
+ * email this manager wrote alongside it.
+ */
+function liveAccountRecord(blob: ClaudeBlob): Record<string, any> | null {
+  const acct = readClaudeConfig()?.oauthAccount;
+  if (!acct?.emailAddress) return null;
+  const blobAccount = (blob.claudeAiOauth as any)?.accountUuid;
+  if (blobAccount) return acct.accountUuid === blobAccount ? acct : null;
+  return blob.email && acct.emailAddress === blob.email ? acct : null;
+}
+
+/**
+ * Point Claude Code's account record at the account being switched to, so
+ * `/status` and `claude auth status` name the login that is actually in use.
+ * Only the `oauthAccount` key is touched, and only when it would change.
+ */
+function writeAccountRecord(record: Record<string, any> | null): void {
+  const cfg = readClaudeConfig();
+  if (!cfg) return; // Claude Code has never run here — nothing to keep in step.
+  const cur = cfg.oauthAccount;
+  const same =
+    (!record && !cur) ||
+    (!!record && !!cur && cur.emailAddress === record.emailAddress && cur.accountUuid === record.accountUuid);
+  if (same) return;
+  if (record) cfg.oauthAccount = record;
+  else delete cfg.oauthAccount;
+  atomicWrite(CLAUDE_CONFIG_FILE, JSON.stringify(cfg, null, 2), { secret: true });
 }
 
 /** Read the live Claude login from wherever this platform keeps it. */
@@ -131,12 +160,22 @@ function readLiveClaudeAuth(): ClaudeBlob | null {
   // build that wrote the file rather than the keychain, still resolves.
   if (!blob) blob = readCredentialsFile();
   if (!blob) return null;
-  const email = liveAccountEmail(blob);
-  return email ? { ...blob, email } : blob;
+  const record = liveAccountRecord(blob);
+  return record ? { ...blob, email: record.emailAddress, [ACCOUNT_KEY]: record } : blob;
 }
 
-/** Replace the live Claude login. */
-function writeLiveClaudeAuth(blob: ClaudeBlob): void {
+/** Replace the live Claude login: the tokens, and the account record that goes with them. */
+function writeLiveClaudeAuth(full: ClaudeBlob): void {
+  const { [ACCOUNT_KEY]: saved, ...blob } = full as Record<string, any>;
+  writeTokens(blob as ClaudeBlob);
+  // A session imported from a token has no saved record; its email is enough
+  // for Claude Code to name the right account.
+  writeAccountRecord(
+    (saved as Record<string, any>) ?? (blob.email ? { emailAddress: blob.email } : null),
+  );
+}
+
+function writeTokens(blob: ClaudeBlob): void {
   if (HAS_KEYCHAIN) {
     try {
       writeKeychain(blob);
@@ -157,10 +196,16 @@ function isoToEpochSec(iso: string | undefined): number {
 
 function normalizeUsage(json: any, plan: string | null): RateLimits | null {
   if (!json) return null;
+  // The API sends `null` for a window the account has not used yet (e.g. no
+  // messages in the current 5h block). On an otherwise valid response that
+  // means 0% used, not "unknown".
+  const valid = "five_hour" in json || "seven_day" in json;
   const win = (w: any, minutes: number): RateLimits["primary"] =>
     w && typeof w.utilization === "number"
       ? { used_percent: w.utilization, window_minutes: minutes, resets_at: isoToEpochSec(w.resets_at) }
-      : null;
+      : w === null && valid
+        ? { used_percent: 0, window_minutes: minutes, resets_at: 0 }
+        : null;
   return {
     primary: win(json.five_hour, 300),
     secondary: win(json.seven_day, 10080),
@@ -169,7 +214,19 @@ function normalizeUsage(json: any, plan: string | null): RateLimits | null {
   };
 }
 
-async function fetchJson(url: string, token: string): Promise<{ status: number; body: any }> {
+/** Retry-After as ms: either delta-seconds or an HTTP date. */
+function parseRetryAfter(v: string | null): number | undefined {
+  if (!v) return undefined;
+  const secs = Number(v);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const at = Date.parse(v);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+async function fetchJson(
+  url: string,
+  token: string,
+): Promise<{ status: number; body: any; retryAfterMs?: number }> {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), 10_000);
   try {
@@ -183,7 +240,7 @@ async function fetchJson(url: string, token: string): Promise<{ status: number; 
       signal: ctrl.signal,
     });
     const body = await res.json().catch(() => null);
-    return { status: res.status, body };
+    return { status: res.status, body, retryAfterMs: parseRetryAfter(res.headers.get("retry-after")) };
   } finally {
     clearTimeout(id);
   }
@@ -224,6 +281,9 @@ export const claudeProvider: Provider = {
   label: "Claude Code",
   stateDir: providerStateDir("claude"),
   supportsLogin: true,
+  // api/oauth/usage allows only a handful of calls per account before it
+  // returns 429, and Claude Code itself spends from the same budget.
+  usagePollMs: 5 * 60_000,
 
   isLoggedIn(): boolean {
     const b = readLiveClaudeAuth();
@@ -260,7 +320,11 @@ export const claudeProvider: Provider = {
     const plan = blob.claudeAiOauth?.subscriptionType || null;
     if (!token) return { rateLimits: null, needsReauth: true };
 
-    let { status, body } = await fetchJson(USAGE_URL, token).catch(() => ({ status: 0, body: null }));
+    let { status, body, retryAfterMs } = await fetchJson(USAGE_URL, token).catch(() => ({
+      status: 0,
+      body: null,
+      retryAfterMs: undefined,
+    }));
     if (status === 401 || status === 403) {
       const refreshed = await refreshToken(blob);
       if (!refreshed) return { rateLimits: null, needsReauth: true };
@@ -283,6 +347,7 @@ export const claudeProvider: Provider = {
         // Token expired and refresh token rejected → session is dead
         return { rateLimits: null, needsReauth: true };
       }
+      if (status === 429) return { rateLimits: null, rateLimited: true, retryAfterMs };
       return { rateLimits: null, error: `HTTP ${status}` };
     }
     return { rateLimits: normalizeUsage(body, plan) };

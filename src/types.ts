@@ -55,6 +55,10 @@ export interface SessionMeta {
   checkedAt?: number;
   /** Why the last check failed, when authState is "error". */
   lastError?: string;
+  /** Usage API throttled this login: skip live checks until this time (ms epoch). */
+  backoffUntil?: number;
+  /** Consecutive throttled checks, for exponential backoff. */
+  backoffStep?: number;
 }
 
 export interface Registry {

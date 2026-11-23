@@ -59,9 +59,12 @@ export function buildDashboard(registry: Registry, now = nowSec()): DashboardMod
     const age = meta.rateLimits?.capturedAt ? now * 1000 - meta.rateLimits.capturedAt : Infinity;
     // Old numbers are only trustworthy while live checks keep succeeding.
     const rl = expired || (failed && age > STALE_AFTER_MS) ? null : meta.rateLimits || null;
+    const backoffLeft = meta.backoffUntil ? meta.backoffUntil - now * 1000 : 0;
     const note = expired
       ? "sign-in expired — sign in again"
-      : failed
+      : backoffLeft > 0
+        ? `usage API is rate-limiting — showing last known numbers, retrying in ${Math.ceil(backoffLeft / 60_000)}m`
+        : failed
         ? `could not update (${meta.lastError || "error"})`
         : "";
     return {

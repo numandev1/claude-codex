@@ -6,7 +6,7 @@ import type { DashboardRow } from "../dashboard.js";
 import { Engine } from "../engine.js";
 import { copyToClipboard, pasteFromClipboard } from "../clipboard.js";
 import { runRemoteLoginFlow } from "../remote.js";
-import { runningProcessCount, RESUME_HINT, HOT_SWAP } from "../liveProcess.js";
+import { runningProcessCount, RESUME_HINT, HOT_SWAP, restartBackgroundServer, SERVER_RESTARTED } from "../liveProcess.js";
 import { buildDashboard } from "../dashboard.js";
 import { isExhausted } from "../rateLimits.js";
 import type { Registry } from "../types.js";
@@ -27,6 +27,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   // new account live), or a restart warning (Codex keeps the old token in
   // memory until the process exits).
   const switchFollowUp = () => {
+    if (restartBackgroundServer(p.id)) return SERVER_RESTARTED;
     const n = runningProcessCount(p.id);
     if (n === 0) return `Run \`${cliName}\` to use it.`;
     if (HOT_SWAP[p.id]) return `Running ${cliName} sessions pick up the new account automatically.`;
@@ -80,11 +81,11 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
   }, [engine, p]);
 
   const refreshInFlight = useRef(false);
-  const doRefresh = useCallback(async () => {
+  const doRefresh = useCallback(async (opts: { auto?: boolean } = { auto: true }) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     setRefreshing(true);
-    try { await engine.refreshAll(); } catch { /* tolerate */ }
+    try { await engine.refreshAll(opts); } catch { /* tolerate */ }
     reload();
     setRefreshing(false);
     refreshInFlight.current = false;
@@ -265,7 +266,7 @@ export default function App({ engine, onBack }: { engine: Engine; onBack?: () =>
       }
       if (char === "n") { const row = currentRow(); if (!row) return; setInput(row.name); setStatus(null); setMode("rename"); return; }
       if (char === "d") { if (!currentRow()) return; setStatus(null); setMode("confirmDelete"); return; }
-      if (char === "R") { setStatus({ kind: "info", text: "Refreshing…" }); void doRefresh().then(() => setStatus({ kind: "ok", text: "Limits updated." })); return; }
+      if (char === "R") { setStatus({ kind: "info", text: "Refreshing…" }); void doRefresh({ auto: false }).then(() => setStatus({ kind: "ok", text: "Limits updated." })); return; }
       if (key.ctrl && char === "c") return exit();        // hard quit
       if (char === "q" || key.escape) return goBack();     // back to provider chooser (or quit)
       return;

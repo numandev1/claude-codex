@@ -7,6 +7,13 @@ import type { Registry, SessionAuth, SessionMeta } from "./types.js";
 
 const BLOB_PREFIX = "claudecodex:v1:";
 
+
+/** Background polls skip a session checked more recently than this. */
+const AUTO_MIN_INTERVAL_MS = 55_000;
+/** Backoff after a throttled (HTTP 429) usage check: 2m, 4m, 8m … capped at 30m. */
+const BACKOFF_BASE_MS = 2 * 60_000;
+const BACKOFF_MAX_MS = 30 * 60_000;
+
 export interface BestResult {
   switched: boolean;
   name?: string;
@@ -308,10 +315,25 @@ export class Engine {
   }
 
   // ---- live usage ----
-  async refreshSession(name: string): Promise<RefreshOutcome> {
+  /**
+   * Live-check one session's limits.
+   * `auto` marks a background poll: it is skipped when the session was checked
+   * moments ago (by this or another open dashboard). A session the usage API
+   * is throttling is never re-checked before its backoff ends.
+   */
+  async refreshSession(name: string, opts: { auto?: boolean } = {}): Promise<RefreshOutcome> {
     let registry = this.store.loadRegistry();
     if (!registry.sessions[name] || !this.store.snapshotExists(name)) {
       return { name, ok: false, error: "no such session" };
+    }
+    const before = registry.sessions[name];
+    const now = Date.now();
+    if (before.backoffUntil && before.backoffUntil > now) {
+      return { name, ok: false, error: "rate-limited" };
+    }
+    const minGap = this.provider.usagePollMs ?? AUTO_MIN_INTERVAL_MS;
+    if (opts.auto && before.checkedAt && now - before.checkedAt < minGap) {
+      return { name, ok: before.authState === "ok" };
     }
     const auth = this.store.readSnapshot(name);
     const result = await this.provider.fetchUsage(auth);
@@ -326,6 +348,22 @@ export class Engine {
     if (!registry.sessions[name]) return { name, ok: false, error: "session removed" };
     const meta = registry.sessions[name];
     meta.checkedAt = Date.now();
+    if (result.rateLimited) {
+      // Throttled, not broken: keep the last numbers and auth state, wait it out.
+      const step = (meta.backoffStep ?? 0) + 1;
+      const wait = result.retryAfterMs ?? Math.min(BACKOFF_BASE_MS * 2 ** (step - 1), BACKOFF_MAX_MS);
+      meta.backoffStep = step;
+      meta.backoffUntil = Date.now() + Math.max(wait, BACKOFF_BASE_MS);
+      // Older builds recorded throttling as a failure; it is not one.
+      if (meta.authState === "error" && meta.lastError === "HTTP 429") {
+        meta.authState = meta.rateLimits ? "ok" : undefined;
+        delete meta.lastError;
+      }
+      this.store.saveRegistry(registry);
+      return { name, ok: false, error: "rate-limited" };
+    }
+    delete meta.backoffUntil;
+    delete meta.backoffStep;
     if (result.rateLimits) {
       meta.rateLimits = { ...result.rateLimits, capturedAt: Date.now(), source: "live" };
       meta.authState = "ok";
@@ -345,14 +383,14 @@ export class Engine {
     return { name, ok: false, needsReauth: result.needsReauth, error: result.error };
   }
 
-  async refreshAll(): Promise<RefreshOutcome[]> {
+  async refreshAll(opts: { auto?: boolean } = {}): Promise<RefreshOutcome[]> {
     // Sequential on purpose: each refreshSession does a load-mutate-save on
     // the registry, so concurrent refreshes clobber each other's writes
     // (lost rateLimits, and worse — a stale `active` re-written over a switch
     // the user just made).
     const names = Object.keys(this.store.loadRegistry().sessions);
     const outcomes: RefreshOutcome[] = [];
-    for (const n of names) outcomes.push(await this.refreshSession(n));
+    for (const n of names) outcomes.push(await this.refreshSession(n, opts));
     return outcomes;
   }
 
@@ -430,7 +468,8 @@ export class Engine {
   // ---- sharing ----
   exportBlob(name: string): string {
     if (!this.store.snapshotExists(name)) throw new Error(`No saved session named "${name}".`);
-    const auth = this.store.readSnapshot(name);
+    // The account record (name, organization) stays on this machine.
+    const { ccxAccount: _omit, ...auth } = this.store.readSnapshot(name);
     return BLOB_PREFIX + Buffer.from(JSON.stringify({ p: this.provider.id, a: auth }), "utf8").toString("base64");
   }
 
